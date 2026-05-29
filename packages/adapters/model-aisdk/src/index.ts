@@ -82,6 +82,10 @@ function resolveModel(model: LanguageModel | string, opts: AiSdkOptions): Langua
   );
 }
 
+// Re-export dynamic factories so callers only need one import.
+export { modelFromEnv } from "./env.js";
+export { loadThinyConfig, type ThinyConfig } from "./config.js";
+
 export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
   const model = resolveModel(opts.model, opts);
 

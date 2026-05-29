@@ -1,9 +1,13 @@
 /**
  * Thiny CLI head — an interactive terminal agent.
  *
+ * Provider is resolved automatically from environment / thiny.config.json.
+ * Zero code changes needed to switch models or providers.
+ *
  * Usage:
- *   pnpm cli                  # uses AGENT_MODEL from .env
- *   AGENT_MODEL=anthropic:claude-haiku-4-5-20251001 pnpm cli
+ *   pnpm cli                              # reads thiny.config.json + .env
+ *   THINY_MODEL=anthropic:claude-haiku-4-5-20251001 pnpm cli
+ *   THINY_MODEL=openai-compat:llama3 THINY_OPENAI_BASE_URL=http://localhost:11434/v1 pnpm cli
  */
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -15,20 +19,16 @@ import {
   toolAudit,
   budgetMiddleware,
 } from "@thiny/core";
-import { aiSdkModel } from "@thiny/model-aisdk";
+import { loadThinyConfig } from "@thiny/model-aisdk";
 import { webSearchPlugin } from "@thiny/plugin-web-search";
 
-// ── Built-in echo tool (always available, useful for demos) ─────────────────
 const echoTool = defineTool({
   name: "echo",
   description: "Echo text back verbatim. Use when asked to repeat or echo something.",
-  parameters: z.object({
-    text: z.string().describe("the text to echo"),
-  }),
+  parameters: z.object({ text: z.string().describe("the text to echo") }),
   execute: async ({ text }) => ({ echoed: text }),
 });
 
-// ── Minimal console logger (swap for @thiny/logger-pino in production) ──────
 const logger = {
   info:  (_o: unknown, m?: string) => process.env.LOG_LEVEL === "debug" && console.error("[info]",  m),
   warn:  (_o: unknown, m?: string) => console.error("[warn]",  m),
@@ -37,29 +37,22 @@ const logger = {
 };
 
 async function main() {
-  const model = process.env.AGENT_MODEL ?? "openai:gpt-4o-mini";
+  // loadThinyConfig reads thiny.config.json (if present) then applies env overrides.
+  // Switching providers = edit thiny.config.json OR set THINY_MODEL in .env. That's it.
+  const model = loadThinyConfig();
 
-  // Support custom base URLs via env vars so any OpenAI-compatible or Anthropic-compatible
-  // backend works without code changes (Ollama, Groq, Together, OpenRouter, LM Studio…)
-  const openaiOpts = process.env.OPENAI_BASE_URL
-    ? { baseURL: process.env.OPENAI_BASE_URL, apiKey: process.env.OPENAI_API_KEY }
-    : process.env.OPENAI_API_KEY
-      ? { apiKey: process.env.OPENAI_API_KEY }
-      : undefined;
-
-  const anthropicOpts = process.env.ANTHROPIC_BASE_URL
-    ? { baseURL: process.env.ANTHROPIC_BASE_URL, apiKey: process.env.ANTHROPIC_API_KEY }
-    : process.env.ANTHROPIC_API_KEY
-      ? { apiKey: process.env.ANTHROPIC_API_KEY }
-      : undefined;
+  const activeModel =
+    process.env["THINY_MODEL"] ??
+    process.env["AGENT_MODEL"] ??
+    "openai:gpt-4o-mini";
 
   const plugins = [];
-  if (process.env.BRAVE_API_KEY) {
-    plugins.push(webSearchPlugin({ apiKey: process.env.BRAVE_API_KEY }));
+  if (process.env["BRAVE_API_KEY"]) {
+    plugins.push(webSearchPlugin({ apiKey: process.env["BRAVE_API_KEY"] }));
   }
 
   const agent = await createAgent({
-    model: aiSdkModel({ model, openai: openaiOpts, anthropic: anthropicOpts }),
+    model,
     systemPrompt:
       "You are a helpful CLI assistant. Use tools when they help you answer better. " +
       "Be concise.",
@@ -78,16 +71,14 @@ async function main() {
   });
 
   const rl = createInterface({ input: stdin, output: stdout });
-  stdout.write(`Thiny agent ready  [model: ${model}]\n`);
+  stdout.write(`Thiny agent ready  [model: ${activeModel}]\n`);
   stdout.write("Type a message and press Enter. Ctrl+C to quit.\n\n");
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const input = await rl.question("> ");
     if (!input.trim()) continue;
 
     try {
-      stdout.write(""); // ensure cursor is ready
       await agent.run(input, {
         sessionId: "cli",
         onToken: (delta) => process.stdout.write(delta),
