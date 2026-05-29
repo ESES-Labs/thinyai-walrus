@@ -36,6 +36,43 @@ Type a message at the `>` prompt. The agent streams responses token-by-token.
 
 ---
 
+## Supported model providers
+
+Thiny works with any OpenAI-compatible or Anthropic-compatible API — no code changes, just set env vars.
+
+```ts
+import { aiSdkModel } from "@thiny/model-aisdk";
+
+// OpenAI
+aiSdkModel({ model: "openai:gpt-4o-mini" })
+
+// Anthropic
+aiSdkModel({ model: "anthropic:claude-haiku-4-5-20251001" })
+
+// Ollama (local, free)
+aiSdkModel({ model: "openai-compat:llama3", openai: { baseURL: "http://localhost:11434/v1", apiKey: "ollama" } })
+
+// Groq
+aiSdkModel({ model: "openai-compat:llama-3.1-70b-versatile", openai: { baseURL: "https://api.groq.com/openai/v1", apiKey: process.env.GROQ_API_KEY } })
+
+// Together AI
+aiSdkModel({ model: "openai-compat:meta-llama/Llama-3-70b-chat-hf", openai: { baseURL: "https://api.together.xyz/v1", apiKey: process.env.TOGETHER_API_KEY } })
+
+// OpenRouter (100+ models with one key)
+aiSdkModel({ model: "openai-compat:anthropic/claude-3.5-haiku", openai: { baseURL: "https://openrouter.ai/api/v1", apiKey: process.env.OPENROUTER_API_KEY } })
+
+// Any vLLM, llama.cpp, LM Studio, or Azure OpenAI endpoint
+aiSdkModel({ model: "openai-compat:my-model", openai: { baseURL: "https://my-server/v1", apiKey: "secret" } })
+
+// Or pass any @ai-sdk LanguageModel directly
+import { groq } from "@ai-sdk/groq";
+aiSdkModel({ model: groq("llama-3.3-70b-versatile") })
+```
+
+The CLI head reads `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` from `.env` automatically — see `.env.example` for all provider setups.
+
+---
+
 ## The minimal agent
 
 ```ts

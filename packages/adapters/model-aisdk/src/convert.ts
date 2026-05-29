@@ -20,11 +20,11 @@ export function toCoreMessages(messages: Message[]): CoreMessage[] {
             role: "assistant",
             content: [
               ...(m.content ? [{ type: "text" as const, text: m.content }] : []),
-              ...m.toolCalls.map((tc) => ({
+              ...m.toolCalls.map((tc: { id: string; name: string; args: unknown }) => ({
                 type: "tool-call" as const,
                 toolCallId: tc.id,
                 toolName: tc.name,
-                args: tc.args,
+                args: tc.args as Record<string, unknown>,
               })),
             ],
           };
@@ -40,6 +40,8 @@ export function toCoreMessages(messages: Message[]): CoreMessage[] {
             result: safeJson(m.content),
           }],
         };
+      default:
+        throw new Error(`unhandled message role: ${(m as { role: string }).role}`);
     }
   });
 }

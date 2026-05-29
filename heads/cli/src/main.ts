@@ -39,13 +39,27 @@ const logger = {
 async function main() {
   const model = process.env.AGENT_MODEL ?? "openai:gpt-4o-mini";
 
+  // Support custom base URLs via env vars so any OpenAI-compatible or Anthropic-compatible
+  // backend works without code changes (Ollama, Groq, Together, OpenRouter, LM Studio…)
+  const openaiOpts = process.env.OPENAI_BASE_URL
+    ? { baseURL: process.env.OPENAI_BASE_URL, apiKey: process.env.OPENAI_API_KEY }
+    : process.env.OPENAI_API_KEY
+      ? { apiKey: process.env.OPENAI_API_KEY }
+      : undefined;
+
+  const anthropicOpts = process.env.ANTHROPIC_BASE_URL
+    ? { baseURL: process.env.ANTHROPIC_BASE_URL, apiKey: process.env.ANTHROPIC_API_KEY }
+    : process.env.ANTHROPIC_API_KEY
+      ? { apiKey: process.env.ANTHROPIC_API_KEY }
+      : undefined;
+
   const plugins = [];
   if (process.env.BRAVE_API_KEY) {
     plugins.push(webSearchPlugin({ apiKey: process.env.BRAVE_API_KEY }));
   }
 
   const agent = await createAgent({
-    model: aiSdkModel({ model }),
+    model: aiSdkModel({ model, openai: openaiOpts, anthropic: anthropicOpts }),
     systemPrompt:
       "You are a helpful CLI assistant. Use tools when they help you answer better. " +
       "Be concise.",
