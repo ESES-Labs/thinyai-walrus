@@ -145,6 +145,15 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  packages/eval:
+    dependencies:
+      '@thiny/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
   packages/plugins/web-search:
     dependencies:
       '@thiny/core':
