@@ -17,42 +17,43 @@ export interface PinoLoggerOptions {
   pretty?: boolean;
 }
 
-function wrap(p: PinoLogger): Logger {
+/** Adapt a pino instance to Thiny's Logger port. */
+function adaptPinoLogger(instance: PinoLogger): Logger {
   return {
     info: (obj, msg) => {
-      p.info(obj, msg);
+      instance.info(obj, msg);
     },
     warn: (obj, msg) => {
-      p.warn(obj, msg);
+      instance.warn(obj, msg);
     },
     error: (obj, msg) => {
-      p.error(obj, msg);
+      instance.error(obj, msg);
     },
-    child: (bindings) => wrap(p.child(bindings)),
+    child: (bindings) => adaptPinoLogger(instance.child(bindings)),
   };
 }
 
 /**
  * Create a structured pino logger that satisfies Thiny's Logger port.
  *
- * @example
+ * @example basic usage
  * ```ts
  * import { pinoLogger } from "@thiny/logger-pino";
  *
  * const agent = await createAgent({
  *   model: loadThinyConfig(),
- *   logger: pinoLogger({ level: "info" }),
+ *   logger: pinoLogger(),
  * });
  * ```
  *
  * @example audit trail to a file
  * ```ts
- * pinoLogger({ level: "info", file: "audit.log" })
+ * pinoLogger({ file: "audit.log" })
  * ```
  *
- * @example pretty terminal output (dev default)
+ * @example force JSON output in development
  * ```ts
- * pinoLogger({ level: "debug", pretty: true })
+ * pinoLogger({ pretty: false })
  * ```
  */
 export function pinoLogger(opts: PinoLoggerOptions = {}): Logger {
@@ -61,28 +62,21 @@ export function pinoLogger(opts: PinoLoggerOptions = {}): Logger {
     opts.pretty ?? (opts.file === undefined && process.env.NODE_ENV !== "production");
 
   if (opts.file) {
-    // File sink: structured JSON, async (non-blocking)
-    const dest = pino.destination({ dest: opts.file, sync: false });
-    return wrap(pino({ level }, dest));
+    const destination = pino.destination({ dest: opts.file, sync: false });
+    return adaptPinoLogger(pino({ level }, destination));
   }
 
   if (usePretty) {
-    // Terminal: human-readable coloured output
-    return wrap(
+    return adaptPinoLogger(
       pino({
         level,
         transport: {
           target: "pino-pretty",
-          options: {
-            colorize: true,
-            translateTime: "HH:MM:ss",
-            ignore: "pid,hostname",
-          },
+          options: { colorize: true, translateTime: "HH:MM:ss", ignore: "pid,hostname" },
         },
       }),
     );
   }
 
-  // Production: plain JSON to stdout
-  return wrap(pino({ level }));
+  return adaptPinoLogger(pino({ level }));
 }

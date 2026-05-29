@@ -41,7 +41,8 @@ describe("runLoop", () => {
       generate: (): Promise<ModelResponse> =>
         Promise.resolve({ text: "hello", finishReason: "stop" }),
     };
-    expect(await runLoop("hi", makeCtx(model))).toBe("hello");
+    const result = await runLoop("hi", makeCtx(model));
+    expect(result.text).toBe("hello");
   });
 
   it("executes a tool then loops back for the final answer", async () => {
@@ -69,7 +70,45 @@ describe("runLoop", () => {
         return Promise.resolve({ text: `done: ${toolMsg.content}`, finishReason: "stop" });
       },
     };
-    expect(await runLoop("echo yo", makeCtx(model, tools))).toBe('done: "echoed:yo"');
+    const result = await runLoop("echo yo", makeCtx(model, tools));
+    expect(result.text).toBe('done: "echoed:yo"');
+  });
+
+  it("returns the full transcript including tool messages", async () => {
+    const tools = new ToolRegistry();
+    tools.register(
+      defineTool({
+        name: "add",
+        description: "add two numbers",
+        parameters: z.object({ a: z.number(), b: z.number() }),
+        execute: ({ a, b }) => Promise.resolve(a + b),
+      }),
+    );
+
+    let step = 0;
+    const model: ModelProvider = {
+      generate: (_messages: Message[]): Promise<ModelResponse> => {
+        step++;
+        if (step === 1) {
+          return Promise.resolve({
+            finishReason: "tool_calls",
+            toolCalls: [{ id: "c1", name: "add", args: { a: 3, b: 4 } }],
+          });
+        }
+        return Promise.resolve({ text: "the sum is 7", finishReason: "stop" });
+      },
+    };
+    const result = await runLoop("3+4", makeCtx(model, tools));
+    expect(result.text).toBe("the sum is 7");
+
+    // Full transcript should have: user, assistant(toolCalls), tool(result), assistant(final)
+    const roles = result.messages.map((m) => m.role);
+    expect(roles).toEqual(["user", "assistant", "tool", "assistant"]);
+
+    // Tool message should contain the computed result
+    const toolMsg = result.messages.find((m) => m.role === "tool");
+    expect(toolMsg).toBeDefined();
+    expect((toolMsg as { content: string }).content).toBe("7");
   });
 
   it("feeds tool errors back as observations (error-as-observation)", async () => {
@@ -98,7 +137,8 @@ describe("runLoop", () => {
         return Promise.resolve({ text: toolMsg.content, finishReason: "stop" });
       },
     };
-    expect(await runLoop("go", makeCtx(model, tools))).toMatch(/ERROR: kaboom/);
+    const result = await runLoop("go", makeCtx(model, tools));
+    expect(result.text).toMatch(/ERROR: kaboom/);
   });
 
   it("throws MaxStepsError when the model loops forever", async () => {

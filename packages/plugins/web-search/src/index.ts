@@ -9,7 +9,7 @@ export interface WebSearchOptions {
   fetchImpl?: typeof fetch;
 }
 
-interface BraveResponse {
+interface BraveSearchResponse {
   web?: { results?: Array<{ title: string; url: string; description: string }> };
 }
 
@@ -28,7 +28,7 @@ interface BraveResponse {
  */
 export function webSearchPlugin(opts: WebSearchOptions): Plugin {
   const endpoint = opts.endpoint ?? "https://api.search.brave.com/res/v1/web/search";
-  const doFetch = opts.fetchImpl ?? fetch;
+  const fetchImpl = opts.fetchImpl ?? fetch;
 
   return {
     name: "web-search",
@@ -44,14 +44,18 @@ export function webSearchPlugin(opts: WebSearchOptions): Plugin {
         }),
         execute: async ({ query, count }) => {
           const url = `${endpoint}?q=${encodeURIComponent(query)}&count=${String(count)}`;
-          const res = await doFetch(url, {
+          const response = await fetchImpl(url, {
             headers: {
               Accept: "application/json",
               "X-Subscription-Token": opts.apiKey,
             },
           });
-          if (!res.ok) throw new Error(`web_search failed: HTTP ${String(res.status)}`);
-          const data = (await res.json()) as BraveResponse;
+
+          if (!response.ok) {
+            throw new Error(`web_search failed: HTTP ${String(response.status)}`);
+          }
+
+          const data = (await response.json()) as BraveSearchResponse;
           return {
             results: (data.web?.results ?? []).map((r) => ({
               title: r.title,

@@ -8,14 +8,34 @@ import type {
   Tool,
   FinishReason,
   StreamEvent,
+  Usage,
 } from "@thiny/core";
 import { toCoreMessages, toAiTools } from "./convert.js";
 
-function mapFinish(reason: string): FinishReason {
+// Re-export dynamic factories so callers only need one import.
+export { modelFromEnv } from "./env.js";
+export { loadThinyConfig, type ThinyConfig } from "./config.js";
+
+/** Map AI SDK finish reasons to Thiny's normalised FinishReason. */
+function toFinishReason(reason: string): FinishReason {
   if (reason === "tool-calls") return "tool_calls";
   if (reason === "length") return "length";
   if (reason === "error") return "error";
   return "stop";
+}
+
+/** Normalise an AI SDK usage object to Thiny's Usage shape. */
+function normalizeUsage(
+  usage: { promptTokens: number; completionTokens: number } | undefined,
+): Usage | undefined {
+  if (!usage) return undefined;
+  return { inputTokens: usage.promptTokens, outputTokens: usage.completionTokens };
+}
+
+/** Build the tool-related fields shared by generateText and streamText. */
+function buildToolOptions(tools: Tool[]) {
+  if (tools.length === 0) return { tools: undefined, toolChoice: undefined };
+  return { tools: toAiTools(tools), toolChoice: "auto" as const };
 }
 
 /** Per-provider connection options. */
@@ -61,26 +81,21 @@ function resolveModel(model: LanguageModel | string, opts: AiSdkOptions): Langua
   if (typeof model !== "string") return model;
 
   const colonIdx = model.indexOf(":");
-  if (colonIdx === -1)
+  if (colonIdx === -1) {
     throw new Error(`invalid model string "${model}" — expected "provider:model-id"`);
+  }
 
   const provider = model.slice(0, colonIdx);
-  const id = model.slice(colonIdx + 1);
+  const modelId = model.slice(colonIdx + 1);
 
   if (provider === "openai" || provider === "openai-compat") {
-    const client = createOpenAI({
-      baseURL: opts.openai?.baseURL,
-      apiKey: opts.openai?.apiKey,
-    });
-    return client(id);
+    return createOpenAI({ baseURL: opts.openai?.baseURL, apiKey: opts.openai?.apiKey })(modelId);
   }
 
   if (provider === "anthropic") {
-    const client = createAnthropic({
-      baseURL: opts.anthropic?.baseURL,
-      apiKey: opts.anthropic?.apiKey,
-    });
-    return client(id);
+    return createAnthropic({ baseURL: opts.anthropic?.baseURL, apiKey: opts.anthropic?.apiKey })(
+      modelId,
+    );
   }
 
   throw new Error(
@@ -90,23 +105,17 @@ function resolveModel(model: LanguageModel | string, opts: AiSdkOptions): Langua
   );
 }
 
-// Re-export dynamic factories so callers only need one import.
-export { modelFromEnv } from "./env.js";
-export { loadThinyConfig, type ThinyConfig } from "./config.js";
-
 export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
   const model = resolveModel(opts.model, opts);
+  const maxRetries = opts.maxRetries ?? 2;
 
   return {
     async generate(messages: Message[], tools: Tool[]): Promise<ModelResponse> {
       const result = await generateText({
         model,
         messages: toCoreMessages(messages),
-
-        tools: tools.length !== 0 ? toAiTools(tools) : undefined,
-
-        toolChoice: tools.length !== 0 ? "auto" : undefined,
-        maxRetries: opts.maxRetries ?? 2,
+        ...buildToolOptions(tools),
+        maxRetries,
       });
       return {
         text: result.text || undefined,
@@ -116,11 +125,9 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
           name: tc.toolName,
           args: tc.args as Record<string, unknown>,
         })),
-        finishReason: mapFinish(result.finishReason),
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        usage: result.usage
-          ? { inputTokens: result.usage.promptTokens, outputTokens: result.usage.completionTokens }
-          : undefined,
+        finishReason: toFinishReason(result.finishReason),
+
+        usage: normalizeUsage(result.usage),
       };
     },
 
@@ -128,11 +135,8 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
       const result = streamText({
         model,
         messages: toCoreMessages(messages),
-
-        tools: tools.length !== 0 ? toAiTools(tools) : undefined,
-
-        toolChoice: tools.length !== 0 ? "auto" : undefined,
-        maxRetries: opts.maxRetries ?? 2,
+        ...buildToolOptions(tools),
+        maxRetries,
       });
       for await (const part of result.fullStream) {
         if (part.type === "text-delta") {
@@ -149,11 +153,9 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
         } else if (part.type === "finish") {
           yield {
             type: "finish",
-            finishReason: mapFinish(part.finishReason),
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-            usage: part.usage
-              ? { inputTokens: part.usage.promptTokens, outputTokens: part.usage.completionTokens }
-              : undefined,
+            finishReason: toFinishReason(part.finishReason),
+
+            usage: normalizeUsage(part.usage),
           };
         }
       }

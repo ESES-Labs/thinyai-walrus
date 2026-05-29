@@ -12,7 +12,13 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { z } from "zod";
-import { createAgent, defineTool, modelAudit, toolAudit, budgetMiddleware } from "@thiny/core";
+import {
+  createAgent,
+  defineTool,
+  modelAuditMiddleware,
+  toolAuditMiddleware,
+  budgetMiddleware,
+} from "@thiny/core";
 import { loadThinyConfig } from "@thiny/model-aisdk";
 import { pinoLogger } from "@thiny/logger-pino";
 import { webSearchPlugin } from "@thiny/plugin-web-search";
@@ -50,10 +56,10 @@ async function main() {
       {
         name: "observability",
         modelMiddleware: [
-          modelAudit(logger),
+          modelAuditMiddleware(logger),
           budgetMiddleware({ maxCalls: 50, maxTokens: 500_000 }),
         ],
-        toolMiddleware: [toolAudit(logger)],
+        toolMiddleware: [toolAuditMiddleware(logger)],
       },
       ...plugins,
     ],

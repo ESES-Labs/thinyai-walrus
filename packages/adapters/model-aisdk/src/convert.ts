@@ -2,15 +2,16 @@ import type { CoreMessage } from "ai";
 import { tool as aiTool } from "ai";
 import type { Message, Tool } from "@thiny/core";
 
-function safeJson(s: string): unknown {
+/** Attempt to parse JSON; return the raw string if parsing fails. */
+function tryParseJSON(value: string): unknown {
   try {
-    return JSON.parse(s);
+    return JSON.parse(value);
   } catch {
-    return s;
+    return value;
   }
 }
 
-/** Our domain Message[] → AI SDK CoreMessage[]. */
+/** Map Thiny domain Message[] → AI SDK CoreMessage[]. */
 export function toCoreMessages(messages: Message[]): CoreMessage[] {
   return messages.map((m): CoreMessage => {
     switch (m.role) {
@@ -42,7 +43,7 @@ export function toCoreMessages(messages: Message[]): CoreMessage[] {
               type: "tool-result",
               toolCallId: m.toolCallId,
               toolName: m.toolName,
-              result: safeJson(m.content),
+              result: tryParseJSON(m.content),
             },
           ],
         };
@@ -52,11 +53,11 @@ export function toCoreMessages(messages: Message[]): CoreMessage[] {
   });
 }
 
-/** Our Tool[] → AI SDK tool set (no execute — the kernel runs tools itself). */
+/** Map Thiny Tool[] → AI SDK tool definitions (without execute — the kernel runs tools). */
 export function toAiTools(tools: Tool[]): Record<string, ReturnType<typeof aiTool>> {
-  const out: Record<string, ReturnType<typeof aiTool>> = {};
-  for (const t of tools) {
-    out[t.name] = aiTool({ description: t.description, parameters: t.parameters });
+  const result: Record<string, ReturnType<typeof aiTool>> = {};
+  for (const tool of tools) {
+    result[tool.name] = aiTool({ description: tool.description, parameters: tool.parameters });
   }
-  return out;
+  return result;
 }

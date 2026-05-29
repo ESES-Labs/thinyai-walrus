@@ -11,6 +11,7 @@ export interface SpawnOptions {
   input: string;
   tools?: Tool[];
   systemPrompt?: string;
+  /** Max steps for this spawned agent (defaults to parent's maxSteps). */
   maxSteps?: number;
 }
 export type Spawn = (opts: SpawnOptions) => Promise<string>;
@@ -28,7 +29,13 @@ function ephemeral(): MemoryBackend {
   };
 }
 
-/** Create a spawn function that runs scoped child agents sharing model/events/logger. */
+/**
+ * Create a spawn function that runs scoped child agents sharing
+ * the parent's model, event bus, and logger.
+ *
+ * Each spawned agent gets its own ToolRegistry and ephemeral memory.
+ * maxSteps defaults to the parent's value but can be overridden per spawn.
+ */
 export function makeSpawn(deps: SpawnDeps, defaults: { maxSteps: number }): Spawn {
   const spawn: Spawn = async (opts) => {
     const registry = new ToolRegistry();
@@ -45,7 +52,8 @@ export function makeSpawn(deps: SpawnDeps, defaults: { maxSteps: number }): Spaw
       spawn,
     };
     const seed: Message[] = opts.systemPrompt ? [systemMessage(opts.systemPrompt)] : [];
-    return runLoop(opts.input, ctx, { seed });
+    const result = await runLoop(opts.input, ctx, { seed });
+    return result.text;
   };
   return spawn;
 }

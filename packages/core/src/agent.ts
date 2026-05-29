@@ -13,6 +13,12 @@ import { assembleStream } from "./stream.js";
 import { makeSpawn } from "./spawn.js";
 import { systemMessage } from "./domain/messages.js";
 
+/**
+ * In-memory session storage. Each `append` call overwrites the full
+ * transcript for the given session (UPSERT semantics) — it does not
+ * incrementally add messages. This keeps the implementation trivial
+ * and matches the behaviour of the upcoming SQLite adapter.
+ */
 class EphemeralMemory implements MemoryBackend {
   private store = new Map<string, Message[]>();
   load(sessionId: string): Promise<Message[]> {
@@ -24,17 +30,17 @@ class EphemeralMemory implements MemoryBackend {
   }
 }
 
-const consoleLogger: Logger = {
+const fallbackLogger: Logger = {
   info: (o, m) => {
-    console.error("[info]", m ?? "", o);
+    console.log("[info]", m ?? "", o);
   },
   warn: (o, m) => {
-    console.error("[warn]", m ?? "", o);
+    console.warn("[warn]", m ?? "", o);
   },
   error: (o, m) => {
     console.error("[error]", m ?? "", o);
   },
-  child: () => consoleLogger,
+  child: () => fallbackLogger,
 };
 
 export interface AgentConfig {
@@ -63,7 +69,7 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
   for (const t of config.tools ?? []) registry.register(t);
 
   const events = new EventBus();
-  const logger = config.logger ?? consoleLogger;
+  const logger = config.logger ?? fallbackLogger;
 
   const collected = await loadPlugins(config.plugins ?? [], {
     registry,
@@ -122,24 +128,24 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
 
     // Composed tool runner — policy / approval / audit all apply here.
     const runTool = composeTool(collected.middleware.tool, async ({ tool, args, ctx: c }) => {
+      // args are already Zod-parsed by the policy middleware at this point.
+      // Re-parse as defense-in-depth (Zod parse on already-parsed data is cheap).
       const parsed = tool.parameters.parse(args);
       return tool.execute(parsed, c);
     });
 
-    const text = await runLoop(input, ctx, {
+    const { text, messages } = await runLoop(input, ctx, {
       seed,
-      generate: (messages, tools) => generate({ messages, tools }),
+      generate: (msgs, tools) => generate({ messages: msgs, tools }),
       runTool: async (tool, args, c) => {
         const result = await runTool({ tool, args, ctx: c });
         return JSON.stringify(result ?? null);
       },
     });
 
-    await memory.append(sessionId, [
-      ...seed,
-      { role: "user", content: input },
-      { role: "assistant", content: text },
-    ]);
+    // Persist the full transcript — including all intermediate tool calls and
+    // results — so the agent retains complete context across restarts.
+    await memory.append(sessionId, messages);
 
     return text;
   }

@@ -19,13 +19,15 @@ export interface Plugin {
   setup?(ctx: Ctx): Promise<void>;
 }
 
-export interface CollectedExtensions {
+/** Aggregated contributions collected from all plugins during the registration phase. */
+export interface PluginExtensions {
   memory?: MemoryBackend;
   middleware: { model: ModelMiddleware[]; tool: ToolMiddleware[] };
 }
 
-export interface LoadPluginsDeps {
+export interface PluginLoaderDeps {
   registry: ToolRegistry;
+  /** Built lazily so setup() sees the fully-populated registry and services. */
   makeSetupCtx: () => Ctx;
 }
 
@@ -36,21 +38,21 @@ export interface LoadPluginsDeps {
  */
 export async function loadPlugins(
   plugins: Plugin[],
-  deps: LoadPluginsDeps,
-): Promise<CollectedExtensions> {
-  const collected: CollectedExtensions = { middleware: { model: [], tool: [] } };
+  deps: PluginLoaderDeps,
+): Promise<PluginExtensions> {
+  const extensions: PluginExtensions = { middleware: { model: [], tool: [] } };
 
-  // Phase 1: register
-  for (const p of plugins) {
-    for (const t of p.tools ?? []) deps.registry.register(t);
-    if (p.memory) collected.memory = p.memory;
-    if (p.modelMiddleware) collected.middleware.model.push(...p.modelMiddleware);
-    if (p.toolMiddleware) collected.middleware.tool.push(...p.toolMiddleware);
+  // Phase 1: register — every plugin's tools/middleware are visible to later phases
+  for (const plugin of plugins) {
+    for (const tool of plugin.tools ?? []) deps.registry.register(tool);
+    if (plugin.memory) extensions.memory = plugin.memory;
+    if (plugin.modelMiddleware) extensions.middleware.model.push(...plugin.modelMiddleware);
+    if (plugin.toolMiddleware) extensions.middleware.tool.push(...plugin.toolMiddleware);
   }
 
-  // Phase 2: setup
+  // Phase 2: setup — plugins may now look up each other's registered tools/services
   const ctx = deps.makeSetupCtx();
-  for (const p of plugins) await p.setup?.(ctx);
+  for (const plugin of plugins) await plugin.setup?.(ctx);
 
-  return collected;
+  return extensions;
 }
