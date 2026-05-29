@@ -1,0 +1,22 @@
+{
+  "name": "@thiny/agent",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "@thiny/core": "workspace:*",
+    "@thiny/logger-pino": "workspace:*",
+    "@thiny/memory-sqlite": "workspace:*",
+    "@thiny/model-aisdk": "workspace:*",
+    "@thiny/plugin-web-search": "workspace:*"
+  },
+  "devDependencies": {
+    "@thiny/core": "workspace:*",
+    "@thiny/logger-pino": "workspace:*",
+    "@thiny/memory-sqlite": "workspace:*",
+    "@thiny/model-aisdk": "workspace:*",
+    "@thiny/plugin-web-search": "workspace:*"
+  }
+}

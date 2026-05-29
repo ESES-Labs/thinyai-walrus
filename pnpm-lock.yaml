@@ -111,6 +111,24 @@ importers:
         specifier: ^9.2.0
         version: 9.14.0
 
+  packages/agent:
+    devDependencies:
+      '@thiny/core':
+        specifier: workspace:*
+        version: link:../core
+      '@thiny/logger-pino':
+        specifier: workspace:*
+        version: link:../adapters/logger-pino
+      '@thiny/memory-sqlite':
+        specifier: workspace:*
+        version: link:../adapters/memory-sqlite
+      '@thiny/model-aisdk':
+        specifier: workspace:*
+        version: link:../adapters/model-aisdk
+      '@thiny/plugin-web-search':
+        specifier: workspace:*
+        version: link:../plugins/web-search
+
   packages/core:
     dependencies:
       zod:

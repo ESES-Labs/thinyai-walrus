@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist", "composite": true },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../core" },
+    { "path": "../adapters/model-aisdk" },
+    { "path": "../adapters/logger-pino" },
+    { "path": "../adapters/memory-sqlite" },
+    { "path": "../plugins/web-search" }
+  ]
+}
