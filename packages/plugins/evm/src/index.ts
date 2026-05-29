@@ -71,7 +71,7 @@ export function evmPlugin(opts: EvmPluginOptions): Plugin {
           address: addressSchema.describe("the 0x EVM address to check"),
         }),
         execute: async ({ address }) => {
-          const wei = await opts.publicClient.getBalance({ address });
+          const wei = await opts.publicClient.getBalance({ address: address as `0x${string}` });
           return { wei: String(wei), eth: formatEther(wei) };
         },
       }),
@@ -89,15 +89,16 @@ export function evmPlugin(opts: EvmPluginOptions): Plugin {
         }),
         execute: async ({ address, abi, functionName, args }) => {
           const result = await opts.publicClient.readContract({
-            address,
+            address: address as `0x${string}`,
             abi: abi as Abi,
             functionName,
             args,
           });
           // Serialise BigInts — JSON.stringify cannot handle them natively.
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-return
           return JSON.parse(
             JSON.stringify(result, (_k, v: unknown) => (typeof v === "bigint" ? String(v) : v)),
-          ) as unknown;
+          );
         },
       }),
 
@@ -130,11 +131,11 @@ export function evmPlugin(opts: EvmPluginOptions): Plugin {
             `Sending ${valueWei} wei to ${to}`,
           );
           const hash = await opts.signer.signAndSend({
-            to,
+            to: to as `0x${string}`,
             value: BigInt(valueWei),
             chainId: opts.chainId,
           });
-          return { hash, to, valueWei, chainId: opts.chainId };
+          return { hash: hash as string, to, valueWei, chainId: opts.chainId };
         },
       }),
     ],

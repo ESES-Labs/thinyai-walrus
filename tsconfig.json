@@ -6,6 +6,7 @@
     { "path": "packages/adapters/logger-pino" },
     { "path": "packages/adapters/memory-sqlite" },
     { "path": "packages/adapters/signer-viem" },
+    { "path": "packages/adapters/mcp" },
     { "path": "packages/plugins/evm" },
     { "path": "packages/plugins/solana" },
     { "path": "packages/agent" },

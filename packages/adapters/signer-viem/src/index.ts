@@ -82,9 +82,11 @@ export function viemSigner(opts: ViemSignerOptions): Signer {
 
     async signAndSend(tx: TxRequest): Promise<Hex> {
       const hash = await walletClient.sendTransaction({
+        account,
         to: tx.to,
         value: tx.value,
         data: tx.data,
+        chain,
       });
       await publicClient.waitForTransactionReceipt({ hash });
       return hash;
