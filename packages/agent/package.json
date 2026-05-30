@@ -7,16 +7,28 @@
   },
   "peerDependencies": {
     "@thiny/core": "workspace:*",
+    "@thiny/eval": "workspace:*",
     "@thiny/logger-pino": "workspace:*",
+    "@thiny/mcp": "workspace:*",
     "@thiny/memory-sqlite": "workspace:*",
     "@thiny/model-aisdk": "workspace:*",
-    "@thiny/plugin-web-search": "workspace:*"
+    "@thiny/plugin-evm": "workspace:*",
+    "@thiny/plugin-solana": "workspace:*",
+    "@thiny/plugin-web-search": "workspace:*",
+    "@thiny/runtime": "workspace:*",
+    "@thiny/signer-viem": "workspace:*"
   },
   "devDependencies": {
     "@thiny/core": "workspace:*",
+    "@thiny/eval": "workspace:*",
     "@thiny/logger-pino": "workspace:*",
+    "@thiny/mcp": "workspace:*",
     "@thiny/memory-sqlite": "workspace:*",
     "@thiny/model-aisdk": "workspace:*",
-    "@thiny/plugin-web-search": "workspace:*"
+    "@thiny/plugin-evm": "workspace:*",
+    "@thiny/plugin-solana": "workspace:*",
+    "@thiny/plugin-web-search": "workspace:*",
+    "@thiny/runtime": "workspace:*",
+    "@thiny/signer-viem": "workspace:*"
   }
 }

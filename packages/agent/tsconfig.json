@@ -7,6 +7,12 @@
     { "path": "../adapters/model-aisdk" },
     { "path": "../adapters/logger-pino" },
     { "path": "../adapters/memory-sqlite" },
-    { "path": "../plugins/web-search" }
+    { "path": "../adapters/signer-viem" },
+    { "path": "../adapters/mcp" },
+    { "path": "../plugins/web-search" },
+    { "path": "../plugins/evm" },
+    { "path": "../plugins/solana" },
+    { "path": "../eval" },
+    { "path": "../runtime" }
   ]
 }

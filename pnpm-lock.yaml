@@ -179,18 +179,36 @@ importers:
       '@thiny/core':
         specifier: workspace:*
         version: link:../core
+      '@thiny/eval':
+        specifier: workspace:*
+        version: link:../eval
       '@thiny/logger-pino':
         specifier: workspace:*
         version: link:../adapters/logger-pino
+      '@thiny/mcp':
+        specifier: workspace:*
+        version: link:../adapters/mcp
       '@thiny/memory-sqlite':
         specifier: workspace:*
         version: link:../adapters/memory-sqlite
       '@thiny/model-aisdk':
         specifier: workspace:*
         version: link:../adapters/model-aisdk
+      '@thiny/plugin-evm':
+        specifier: workspace:*
+        version: link:../plugins/evm
+      '@thiny/plugin-solana':
+        specifier: workspace:*
+        version: link:../plugins/solana
       '@thiny/plugin-web-search':
         specifier: workspace:*
         version: link:../plugins/web-search
+      '@thiny/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@thiny/signer-viem':
+        specifier: workspace:*
+        version: link:../adapters/signer-viem
 
   packages/core:
     dependencies:
