@@ -200,18 +200,24 @@ export async function freeKnowledgePlugin(
   let embedFn: Embedder;
   try {
     // Try to use @xenova/transformers for free local embeddings
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const { pipeline } = await import("@xenova/transformers");
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-    const pipe = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+
+    // @ts-expect-error — @xenova/transformers is an optional peer dep
+
+    const { pipeline } = (await import("@xenova/transformers")) as {
+      pipeline: (...args: unknown[]) => Promise<unknown>;
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pipe = (await (pipeline as (...a: unknown[]) => Promise<any>)(
+      "feature-extraction",
+      "Xenova/all-MiniLM-L6-v2",
+    )) as (text: string, opts: object) => Promise<{ data: Float32Array }>;
     embedFn = async (texts: string[]) => {
       const results: number[][] = [];
       for (const text of texts) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-        const output = (await pipe(text, { pooling: "mean", normalize: true })) as {
-          data: Float32Array;
-        };
-        results.push(Array.from(output.data));
+        const output = await pipe(text, { pooling: "mean", normalize: true });
+        const _typed = output;
+        results.push(Array.from(_typed.data));
       }
       return results;
     };
