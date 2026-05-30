@@ -16,7 +16,7 @@ import {
   toolAuditMiddleware,
   budgetMiddleware,
 } from "@thiny/core";
-import { loadThinyConfig } from "@thiny/model-aisdk";
+import { loadThinyConfig, readThinyConfig } from "@thiny/model-aisdk";
 import { pinoLogger } from "@thiny/logger-pino";
 import { sqliteMemory } from "@thiny/memory-sqlite";
 import { defaultRegistry } from "@thiny/skills";
@@ -68,7 +68,12 @@ async function main(): Promise<void> {
 
   const memory = await sqliteMemory({ url: process.env.SESSION_DB ?? "file:thiny.sqlite" });
 
-  const requestedSkillIds = parseSkillArgs();
+  // Skills: merge thiny.config.json "skills" array with CLI --skills flag.
+
+  const configSkills: string[] = readThinyConfig().skills ?? [];
+
+  const cliSkills = parseSkillArgs();
+  const requestedSkillIds = [...new Set([...configSkills, ...cliSkills])];
   const { plugins: skillPlugins, warnings: skillWarnings } = await loadSkills(
     requestedSkillIds,
     process.env,

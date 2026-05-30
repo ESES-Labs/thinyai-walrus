@@ -29,6 +29,12 @@ export interface ThinyConfig {
   anthropic?: { baseURL?: string; apiKey?: string };
   maxRetries?: number;
   /**
+   * Skill IDs to load automatically.
+   * Equivalent to passing `--skills id1,id2` on the CLI.
+   * @example ["web-search", "evm", "market"]
+   */
+  skills?: string[];
+  /**
    * Public persona — makes the agent always identify itself by `name`
    * regardless of the underlying model.
    * Also readable from env vars: THINY_PERSONA_NAME, THINY_PERSONA_DESCRIPTION.
@@ -144,6 +150,28 @@ export function loadThinyConfig(configPath?: string): ModelProvider {
   if (anthropic.baseURL ?? anthropic.apiKey) adapterOptions.anthropic = anthropic;
 
   return aiSdkModel(adapterOptions);
+}
+
+/**
+ * Read the raw `thiny.config.json` without building a model provider.
+ * Useful for reading `skills`, `persona`, or other metadata from the config.
+ * Returns `{}` when no config file is found.
+ */
+export function readThinyConfig(configPath?: string): ThinyConfig {
+  const candidates = configPath
+    ? [configPath]
+    : [resolve(process.cwd(), "thiny.config.json"), resolve(process.cwd(), ".thinyrc.json")];
+
+  for (const candidatePath of candidates) {
+    if (existsSync(candidatePath)) {
+      try {
+        return JSON.parse(readFileSync(candidatePath, "utf8")) as ThinyConfig;
+      } catch {
+        return {};
+      }
+    }
+  }
+  return {};
 }
 
 /** Re-export so callers only need one import. */

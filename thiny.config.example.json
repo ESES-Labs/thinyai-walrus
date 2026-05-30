@@ -8,5 +8,7 @@
   "persona": {
     "name": "ThinyAI",
     "description": "a helpful AI assistant built on the Thiny framework"
-  }
+  },
+  "skills": ["web-search"],
+  "_comment3": "Skills to load automatically (see pnpm cli --list-skills for all options)"
 }
