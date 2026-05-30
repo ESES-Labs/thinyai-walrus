@@ -49,6 +49,11 @@ async function main(): Promise<void> {
     url: process.env.SESSION_DB ?? "file:thiny.sqlite",
   });
 
+  // Persona: reads from env vars first, then thiny.config.json
+  const personaName = process.env.THINY_PERSONA_NAME;
+  const personaDescription = process.env.THINY_PERSONA_DESCRIPTION;
+  const persona = personaName ? { name: personaName, description: personaDescription } : undefined;
+
   const plugins = [];
   if (process.env.BRAVE_API_KEY) {
     plugins.push(webSearchPlugin({ apiKey: process.env.BRAVE_API_KEY }));
@@ -58,6 +63,7 @@ async function main(): Promise<void> {
     model,
     logger,
     memory,
+    persona,
     systemPrompt:
       "You are a helpful CLI assistant. Use tools when they help you answer better. " +
       "Be concise.",

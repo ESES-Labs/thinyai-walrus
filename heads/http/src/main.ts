@@ -17,6 +17,10 @@ import { WEB_UI } from "./web.js";
 async function main(): Promise<void> {
   const logger = pinoLogger({ level: process.env.LOG_LEVEL ?? "info" });
 
+  const personaName = process.env.THINY_PERSONA_NAME;
+  const personaDescription = process.env.THINY_PERSONA_DESCRIPTION;
+  const persona = personaName ? { name: personaName, description: personaDescription } : undefined;
+
   const plugins = [];
   if (process.env.BRAVE_API_KEY) {
     plugins.push(webSearchPlugin({ apiKey: process.env.BRAVE_API_KEY }));
@@ -26,6 +30,7 @@ async function main(): Promise<void> {
     model: loadThinyConfig(),
     logger,
     memory: await sqliteMemory({ url: process.env.SESSION_DB ?? "file:thiny.sqlite" }),
+    persona,
     systemPrompt: "You are a helpful web-based AI assistant. Be concise and helpful.",
     plugins,
   });

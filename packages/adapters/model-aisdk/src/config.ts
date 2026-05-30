@@ -28,6 +28,12 @@ export interface ThinyConfig {
   openai?: { baseURL?: string; apiKey?: string };
   anthropic?: { baseURL?: string; apiKey?: string };
   maxRetries?: number;
+  /**
+   * Public persona — makes the agent always identify itself by `name`
+   * regardless of the underlying model.
+   * Also readable from env vars: THINY_PERSONA_NAME, THINY_PERSONA_DESCRIPTION.
+   */
+  persona?: { name?: string; description?: string };
 }
 
 /**

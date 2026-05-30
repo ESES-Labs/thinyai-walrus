@@ -25,3 +25,4 @@ export * from "./middleware/audit.js";
 export * from "./middleware/budget.js";
 export * from "./middleware/policy.js";
 export * from "./middleware/compaction.js";
+export * from "./middleware/identity.js";

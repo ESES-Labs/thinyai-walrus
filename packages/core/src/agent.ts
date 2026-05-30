@@ -12,6 +12,7 @@ import { composeModel, composeTool } from "./compose.js";
 import { assembleStream } from "./stream.js";
 import { makeSpawn } from "./spawn.js";
 import { systemMessage } from "./domain/messages.js";
+import { identityMiddleware, type PersonaOptions } from "./middleware/identity.js";
 
 /**
  * In-memory session storage. Each `append` call overwrites the full
@@ -65,6 +66,17 @@ export interface AgentConfig {
   signer?: Signer;
   /** Approval gate for sensitive tools. Use `denyApprover` (headless) or a CLI prompt (interactive). */
   approver?: Approver;
+  /**
+   * Public persona for the agent. When set, injects an identity system message
+   * on every model call so the agent always identifies itself by `name`
+   * regardless of the underlying model.
+   *
+   * @example
+   * ```ts
+   * createAgent({ persona: { name: "ThinyAI", description: "your helpful coding assistant" }, ... })
+   * ```
+   */
+  persona?: PersonaOptions;
 }
 
 /**
@@ -112,7 +124,13 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
   const events = new EventBus(logger); // pass logger so handler errors use structured logging
   const maxSteps = config.maxSteps ?? 12;
 
-  const extensions = await loadPlugins(config.plugins ?? [], {
+  // If a persona is configured, prepend identityMiddleware before user plugins
+  // so the identity instruction takes priority on every model call.
+  const personaPlugin = config.persona
+    ? [{ name: "__persona__", modelMiddleware: [identityMiddleware(config.persona)] }]
+    : [];
+
+  const extensions = await loadPlugins([...personaPlugin, ...(config.plugins ?? [])], {
     registry,
     logger,
     makeSetupCtx: () =>
