@@ -1,0 +1,77 @@
+<h2>Clean design directions — no gradients, no neon</h2>
+<p class="subtitle">Typography and spacing do the work. Accent used sparingly, not plastered everywhere.</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="editorial" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#0c0c0c;border-radius:8px;padding:20px;height:200px;overflow:hidden;position:relative;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;">
+      <!-- Editorial mockup -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #222;">
+        <span style="color:#fff;font-size:13px;font-weight:500;letter-spacing:0.5px;">thiny</span>
+        <div style="display:flex;gap:20px;">
+          <span style="color:#666;font-size:11px;">docs</span>
+          <span style="color:#666;font-size:11px;">plugins</span>
+          <span style="color:#fff;font-size:11px;background:#fff;color:#000;padding:2px 8px;border-radius:3px;font-weight:500;">get started</span>
+        </div>
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="color:#fff;font-size:22px;font-weight:700;line-height:1.15;letter-spacing:-0.5px;">Own a kernel.<br>Not a framework.</div>
+      </div>
+      <div style="color:#555;font-size:10px;line-height:1.6;max-width:260px;">A lightweight TypeScript microkernel for AI agents. Web2 tools and Web3 actions from one reusable core.</div>
+    </div>
+    <div class="card-body">
+      <h3>Editorial</h3>
+      <p>Black background. White type. One accent — used once, for the primary CTA. Everything else is contrast and spacing. Like Resend, Turso, or Clerk. The text does the selling.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="system-ui" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#111;border-radius:8px;padding:20px;height:200px;overflow:hidden;position:relative;font-family:'SF Mono','Fira Code',monospace;">
+      <!-- System UI mockup -->
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:16px;">
+        <div style="width:8px;height:8px;background:#3b3b3b;border-radius:50%;"></div>
+        <div style="width:8px;height:8px;background:#3b3b3b;border-radius:50%;"></div>
+        <div style="width:8px;height:8px;background:#3b3b3b;border-radius:50%;"></div>
+        <span style="color:#444;font-size:9px;margin-left:8px;">thiny — terminal</span>
+      </div>
+      <div style="color:#888;font-size:10px;line-height:1.8;">
+        <span style="color:#555;">$</span> <span style="color:#ccc;">pnpm create-thiny my-bot</span><br>
+        <span style="color:#555;">✓</span> <span style="color:#777;">Created my-bot/ in 0.4s</span><br>
+        <span style="color:#555;">$</span> <span style="color:#ccc;">cd my-bot && pnpm agent "hi"</span><br>
+        <br>
+        <span style="color:#777;">Thiny Agent ready · mimo-v2.5-pro</span><br>
+        <span style="color:#555;">&gt;</span> <span style="color:#aaa;">Hello! How can I help?</span><span style="color:#555;animation:blink 1s infinite;">▋</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>System UI</h3>
+      <p>The website IS the terminal. Dark shell chrome, monospace, grays only. No marketing language — just the tool demonstrating itself. Like Charm.sh or Warp's landing page.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="neutral-clean" onclick="toggleSelect(this)">
+    <div class="card-image" style="background:#fafafa;border-radius:8px;padding:20px;height:200px;overflow:hidden;position:relative;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;">
+      <!-- Light/neutral mockup -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <span style="color:#111;font-size:13px;font-weight:600;">thiny</span>
+        <div style="display:flex;gap:16px;">
+          <span style="color:#777;font-size:11px;">docs</span>
+          <span style="color:#777;font-size:11px;">plugins</span>
+          <span style="color:#111;font-size:11px;border:1px solid #ddd;padding:2px 8px;border-radius:4px;">GitHub ↗</span>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <div style="display:inline-block;background:#f0f0f0;color:#333;font-size:9px;padding:2px 8px;border-radius:9999px;margin-bottom:8px;font-family:monospace;">v0.1.0 · 148 tests passing</div>
+        <div style="color:#111;font-size:18px;font-weight:700;line-height:1.2;">The thin, tiny<br>AI agent core</div>
+      </div>
+      <div style="color:#888;font-size:9px;background:#f5f5f5;border-radius:4px;padding:8px;font-family:monospace;">pnpm create-thiny my-agent</div>
+    </div>
+    <div class="card-body">
+      <h3>Neutral / Light</h3>
+      <p>Off-white or light gray. No dark mode gimmick. Clean, professional, readable — like Hono docs, Bun.sh, or Zed's site. Stands out because everyone else is dark.</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:16px;text-align:center;">Or — describe what sites you actually like the look of. That's the fastest path to the right direction.</p>
