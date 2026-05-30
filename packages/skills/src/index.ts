@@ -187,3 +187,55 @@ export class SkillRegistry {
 
 /** Default global registry with all built-in skills. */
 export const defaultRegistry = new SkillRegistry();
+
+// ── Community skills ───────────────────────────────────────────────────────────
+
+/**
+ * Load community skills from npm packages following the `thiny-skill-*` convention.
+ *
+ * A community skill package must export a default `SkillDefinition` or
+ * `SkillDefinition[]`. Install with: `npm install thiny-skill-github`
+ *
+ * @example
+ * ```ts
+ * await loadCommunitySkill("github", registry);
+ * // Tries to import: thiny-skill-github
+ * ```
+ */
+export async function loadCommunitySkill(
+  id: string,
+  registry: SkillRegistry = defaultRegistry,
+): Promise<boolean> {
+  const packageName = id.startsWith("thiny-skill-") ? id : `thiny-skill-${id}`;
+  try {
+    const mod = (await import(packageName)) as { default?: SkillDefinition | SkillDefinition[] };
+    const defs = mod.default;
+    if (!defs) return false;
+    const list = Array.isArray(defs) ? defs : [defs];
+    for (const def of list) registry.add(def);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Load community skills by IDs.
+ * Returns IDs that were successfully loaded.
+ *
+ * @example
+ * ```ts
+ * const loaded = await loadCommunitySkills(["github", "obsidian"]);
+ * ```
+ */
+export async function loadCommunitySkills(
+  ids: string[],
+  registry: SkillRegistry = defaultRegistry,
+): Promise<string[]> {
+  const loaded: string[] = [];
+  for (const id of ids) {
+    const ok = await loadCommunitySkill(id, registry);
+    if (ok) loaded.push(id);
+  }
+  return loaded;
+}
