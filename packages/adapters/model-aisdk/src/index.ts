@@ -49,11 +49,20 @@ export interface ProviderOptions {
 
 export interface AiSdkOptions {
   /**
-   * Which model to use. Three forms:
+   * Which model to use. Four forms:
    *
-   * 1. Shorthand string   — `"openai:gpt-4o-mini"` / `"anthropic:claude-haiku-4-5-20251001"`
-   * 2. Custom-compat      — `"openai-compat:model-id"` + `openai.baseURL` for any OpenAI-compatible API
-   * 3. Pre-built instance — pass a `LanguageModel` directly from any `@ai-sdk/*` provider
+   * 1. **Bare model ID** (simplest) — `"gpt-4o-mini"`, `"mimo-v2.5-pro"`, `"llama3"`
+   *    Provider is auto-detected: if `openai.baseURL` is set → OpenAI-compatible;
+   *    if `anthropic.baseURL` is set → Anthropic-compatible; otherwise → standard OpenAI.
+   *
+   * 2. **Prefixed string** — `"openai:gpt-4o-mini"` / `"anthropic:claude-haiku-4-5-20251001"`
+   *    Explicit provider, no base URL needed for the official APIs.
+   *
+   * 3. **Compat prefix** — `"openai-compat:model-id"` + `openai.baseURL`
+   *    For any OpenAI-compatible endpoint (Ollama, Groq, Mimo, etc.).
+   *    Equivalent to form 1 when `openai.baseURL` is set.
+   *
+   * 4. **Pre-built instance** — pass a `LanguageModel` from any `@ai-sdk/*` package directly.
    */
   model: LanguageModel | string;
 
@@ -82,8 +91,21 @@ function resolveModel(model: LanguageModel | string, opts: AiSdkOptions): Langua
   if (typeof model !== "string") return model;
 
   const colonIdx = model.indexOf(":");
+
+  // ── Bare model ID (no prefix) ────────────────────────────────────────────
+  // When the model string has no "provider:" prefix, auto-detect the provider
+  // from whichever base URL is configured:
+  //   - THINY_OPENAI_BASE_URL set  → OpenAI-compatible endpoint
+  //   - THINY_ANTHROPIC_BASE_URL set → Anthropic-compatible endpoint
+  //   - Neither set                 → standard OpenAI (default)
+  // This lets you write THINY_MODEL=mimo-v2.5-pro instead of openai-compat:mimo-v2.5-pro.
   if (colonIdx === -1) {
-    throw new Error(`invalid model string "${model}" — expected "provider:model-id"`);
+    if (opts.anthropic?.baseURL) {
+      return createAnthropic({ baseURL: opts.anthropic.baseURL, apiKey: opts.anthropic.apiKey })(
+        model,
+      );
+    }
+    return createOpenAI({ baseURL: opts.openai?.baseURL, apiKey: opts.openai?.apiKey })(model);
   }
 
   const provider = model.slice(0, colonIdx);
@@ -101,7 +123,8 @@ function resolveModel(model: LanguageModel | string, opts: AiSdkOptions): Langua
 
   throw new Error(
     `unknown provider "${provider}" in model string "${model}"\n` +
-      `Supported: "openai:<id>", "openai-compat:<id>", "anthropic:<id>"\n` +
+      `Supported prefixes: "openai:<id>", "openai-compat:<id>", "anthropic:<id>"\n` +
+      `Or omit the prefix and set THINY_OPENAI_BASE_URL / THINY_ANTHROPIC_BASE_URL instead.\n` +
       `Or pass a LanguageModel instance directly.`,
   );
 }

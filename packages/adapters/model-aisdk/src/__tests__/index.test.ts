@@ -3,21 +3,20 @@ import type { LanguageModel } from "ai";
 import { aiSdkModel } from "../index.js";
 
 describe("aiSdkModel — model string resolution", () => {
+  // ── Pre-built instance ────────────────────────────────────────────────────
   it("accepts a pre-built LanguageModel instance without resolving", () => {
     const fakeModel = {} as unknown as LanguageModel;
     expect(() => aiSdkModel({ model: fakeModel })).not.toThrow();
   });
 
+  // ── Explicit prefixes ─────────────────────────────────────────────────────
   it("resolves openai:model-id with default settings", () => {
     expect(() => aiSdkModel({ model: "openai:gpt-4o-mini" })).not.toThrow();
   });
 
-  it("resolves openai:model-id with a custom baseURL (OpenAI-compatible provider)", () => {
+  it("resolves openai:model-id with a custom baseURL", () => {
     expect(() =>
-      aiSdkModel({
-        model: "openai:llama3",
-        openai: { baseURL: "http://localhost:11434/v1", apiKey: "ollama" },
-      }),
+      aiSdkModel({ model: "openai:llama3", openai: { baseURL: "http://localhost:11434/v1" } }),
     ).not.toThrow();
   });
 
@@ -34,7 +33,7 @@ describe("aiSdkModel — model string resolution", () => {
     expect(() => aiSdkModel({ model: "anthropic:claude-haiku-4-5-20251001" })).not.toThrow();
   });
 
-  it("resolves anthropic:model-id with a custom baseURL (proxy / compatible backend)", () => {
+  it("resolves anthropic:model-id with a custom baseURL", () => {
     expect(() =>
       aiSdkModel({
         model: "anthropic:claude-3-5-haiku-20241022",
@@ -43,11 +42,64 @@ describe("aiSdkModel — model string resolution", () => {
     ).not.toThrow();
   });
 
-  it("throws a clear error for an unknown provider", () => {
+  it("throws a clear error for an unknown provider prefix", () => {
     expect(() => aiSdkModel({ model: "groq:llama3" })).toThrow(/unknown provider "groq"/);
   });
 
-  it("throws a clear error for a malformed model string (no colon)", () => {
-    expect(() => aiSdkModel({ model: "gpt-4o-mini" })).toThrow(/invalid model string/);
+  // ── Bare model ID (no prefix) — auto-detect from base URL ─────────────────
+  it("resolves a bare model ID as OpenAI when no base URL is set", () => {
+    // No prefix, no base URL → falls back to standard OpenAI
+    expect(() => aiSdkModel({ model: "gpt-4o-mini" })).not.toThrow();
+  });
+
+  it("resolves a bare model ID as OpenAI-compatible when openai.baseURL is set", () => {
+    // The Mimo use case: just set the model name + base URL
+    expect(() =>
+      aiSdkModel({
+        model: "mimo-v2.5-pro",
+        openai: {
+          baseURL: "https://token-plan-sgp.xiaomimimo.com/v1",
+          apiKey: "your-mimo-key",
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("resolves a bare model ID as Ollama (OpenAI-compat) when openai.baseURL is set", () => {
+    expect(() =>
+      aiSdkModel({
+        model: "llama3",
+        openai: { baseURL: "http://localhost:11434/v1", apiKey: "ollama" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("resolves a bare model ID as Groq (OpenAI-compat) when openai.baseURL is set", () => {
+    expect(() =>
+      aiSdkModel({
+        model: "llama-3.1-70b-versatile",
+        openai: { baseURL: "https://api.groq.com/openai/v1", apiKey: "gsk_test" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("resolves a bare model ID as Anthropic-compatible when anthropic.baseURL is set", () => {
+    expect(() =>
+      aiSdkModel({
+        model: "my-custom-model",
+        anthropic: { baseURL: "https://my-anthropic-proxy.com", apiKey: "key" },
+      }),
+    ).not.toThrow();
+  });
+
+  it("prefers anthropic when anthropic.baseURL is set over openai fallback", () => {
+    // When anthropic.baseURL is set, bare model ID should use anthropic even
+    // if openai is also partially configured.
+    expect(() =>
+      aiSdkModel({
+        model: "some-model",
+        anthropic: { baseURL: "https://my-proxy.example.com" },
+      }),
+    ).not.toThrow();
   });
 });
