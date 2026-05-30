@@ -8,25 +8,37 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html"],
-      // Include only source files — exclude tests, barrels, and type-only files
       include: [
+        // Core kernel
         "packages/core/src/**/*.ts",
+
+        // Adapters
         "packages/adapters/*/src/**/*.ts",
+
+        // Plugins — all of them
         "packages/plugins/*/src/**/*.ts",
+
+        // Eval harness
+        "packages/eval/src/**/*.ts",
+
+        // Runtime scheduler
+        "packages/runtime/src/**/*.ts",
       ],
       exclude: [
         "**/__tests__/**",
         "**/*.test.ts",
-        "**/index.ts", // barrel re-export files
-        "**/domain/**/*.ts", // type-only domain files
+        "**/index.ts", // barrel re-export files have no logic to cover
+        "**/domain/**/*.ts", // type-only files (interfaces, enums)
+        "**/adapter-logger.ts", // tiny wrapper, covered transitively
         "**/dist/**",
       ],
-      // Thresholds — increase these as the test suite grows
+      // Thresholds reflect actual measured coverage (2026-05-30).
+      // Raise these as new tests are added — never lower them.
       thresholds: {
-        statements: 55,
-        branches: 50,
-        functions: 40,
-        lines: 55,
+        statements: 80,
+        branches: 80,
+        functions: 75,
+        lines: 80,
       },
     },
   },
