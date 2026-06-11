@@ -23,6 +23,29 @@ export interface PinoLoggerOptions {
   stderr?: boolean;
 }
 
+/** Default sensitive paths to redact from logs. */
+export const DEFAULT_REDACT_PATHS = [
+  "authorization",
+  "apiKey",
+  "api_key",
+  "privateKey",
+  "AGENT_PRIVATE_KEY",
+  "*.token",
+  "headers.authorization",
+  "headers[*].authorization",
+];
+
+/** Base pino config with redaction */
+function pinoConfig(level: string): pino.LoggerOptions {
+  return {
+    level,
+    redact: {
+      paths: DEFAULT_REDACT_PATHS,
+      censor: "[REDACTED]",
+    },
+  };
+}
+
 /** Adapt a pino instance to Thiny's Logger port. */
 function adaptPinoLogger(instance: PinoLogger): Logger {
   return {
@@ -41,6 +64,10 @@ function adaptPinoLogger(instance: PinoLogger): Logger {
 
 /**
  * Create a structured pino logger that satisfies Thiny's Logger port.
+ *
+ * Includes default secret redaction for common sensitive fields:
+ * authorization, apiKey, privateKey, AGENT_PRIVATE_KEY, tokens, etc.
+ * Redacted values are replaced with "[REDACTED]" in log output.
  *
  * @example basic usage
  * ```ts
@@ -67,13 +94,15 @@ export function pinoLogger(opts: PinoLoggerOptions = {}): Logger {
 
   // stderr mode: structured JSON to fd 2 — never pollutes stdout/TUI
   if (opts.stderr) {
-    return adaptPinoLogger(pino({ level }, pino.destination({ dest: 2, sync: false })));
+    return adaptPinoLogger(
+      pino(pinoConfig(level), pino.destination({ dest: 2, sync: false })),
+    );
   }
 
   // File sink: structured JSON, async (non-blocking)
   if (opts.file) {
     const destination = pino.destination({ dest: opts.file, sync: false });
-    return adaptPinoLogger(pino({ level }, destination));
+    return adaptPinoLogger(pino(pinoConfig(level), destination));
   }
 
   const usePretty =
@@ -82,7 +111,7 @@ export function pinoLogger(opts: PinoLoggerOptions = {}): Logger {
   if (usePretty) {
     return adaptPinoLogger(
       pino({
-        level,
+        ...pinoConfig(level),
         transport: {
           target: "pino-pretty",
           options: { colorize: true, translateTime: "HH:MM:ss", ignore: "pid,hostname" },
@@ -91,5 +120,5 @@ export function pinoLogger(opts: PinoLoggerOptions = {}): Logger {
     );
   }
 
-  return adaptPinoLogger(pino({ level }));
+  return adaptPinoLogger(pino(pinoConfig(level)));
 }
