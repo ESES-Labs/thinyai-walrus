@@ -15,11 +15,15 @@ import { loadThinyConfig } from "@thiny/model-aisdk";
 import { pinoLogger } from "@thiny/logger-pino";
 import { sqliteMemory } from "@thiny/memory-sqlite";
 import { Runtime } from "@thiny/runtime";
+import { otelTracingPlugin } from "@thiny/otel";
+import { initOtel } from "./otel.js";
 
 async function main(): Promise<void> {
   const logger = pinoLogger({ level: process.env.LOG_LEVEL ?? "info" });
+  await initOtel();
 
   const agent = await createAgent({
+    plugins: [otelTracingPlugin()],
     model: loadThinyConfig(),
     logger,
     memory: await sqliteMemory({ url: process.env.SESSION_DB ?? "file:thiny.sqlite" }),
