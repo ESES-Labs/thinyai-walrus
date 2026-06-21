@@ -9,7 +9,7 @@
   "dependencies": {
     "@libsql/client": "*",
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.218.0",
-    "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.219.0",
     "@opentelemetry/sdk-node": "^0.218.0",
     "@thiny/core": "workspace:*",
     "@thiny/logger-pino": "workspace:*",
