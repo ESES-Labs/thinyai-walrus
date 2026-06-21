@@ -162,6 +162,7 @@ async function main(): Promise<void> {
   // Durable facts live on Walrus and are auto-injected each turn. MemWal (semantic) when provisioned.
   const userId = process.env.THINY_USER_ID ?? "default";
   const memwalEnabled = !!process.env.MEMWAL_DELEGATE_KEY && !!process.env.MEMWAL_ACCOUNT_ID;
+  const memBackend = memwalEnabled ? "MemWal" : "Walrus"; // shown in the "memory saved on …" line
   // Walrus memory writes are backgrounded (non-blocking). Track in-flight writes so we can show a
   // "saving…" hint, and deliver the verifiable link whenever the write lands — even after the turn,
   // above the prompt the user is already typing at. `deliverRef` is upgraded once `rl` exists.
@@ -304,7 +305,7 @@ async function main(): Promise<void> {
   deliverRef = (ref) => {
     if (atPrompt) {
       printAbovePrompt(() => {
-        renderStored("memory", explorerLinks(ref, network));
+        renderStored("memory saved", explorerLinks(ref, network), memBackend);
       });
     } else memoryRefs.push(ref);
   };
@@ -312,8 +313,9 @@ async function main(): Promise<void> {
   try {
   for (;;) {
     // Any write that finished in the gap since the last render → show its link before prompting.
-    for (const ref of memoryRefs.splice(0)) renderStored("memory", explorerLinks(ref, network));
-    if (pendingWrites > 0) renderSaving("memory"); // a write from the last turn is still uploading
+    for (const ref of memoryRefs.splice(0))
+      renderStored("memory saved", explorerLinks(ref, network), memBackend);
+    if (pendingWrites > 0) renderSaving("memory", memBackend); // last turn's write still uploading
     atPrompt = true;
     const input = await rl.question(PROMPT);
     atPrompt = false;
@@ -422,10 +424,11 @@ async function main(): Promise<void> {
       const reply = await agent.run(trimmed, {
         sessionId: currentSessionId,
         onToken: (delta) => {
-          if (firstToken) {
-            spinner.stop();
-            firstToken = false;
-          }
+          // Stop the spinner on every token, not just the first: it gets restarted after each tool
+          // call, so post-tool tokens would otherwise stream over the live "running…" line and
+          // corrupt the output. stop() is a no-op once already stopped.
+          spinner.stop();
+          firstToken = false;
           stream.push(delta);
         },
       });
@@ -457,14 +460,15 @@ async function main(): Promise<void> {
 
       // Memory that already finished uploading this turn → show its verifiable blob(s) now.
       // Writes still in flight surface later (above the prompt) via deliverRef.
-      for (const ref of memoryRefs.splice(0)) renderStored("memory", explorerLinks(ref, network));
+      for (const ref of memoryRefs.splice(0))
+        renderStored("memory saved", explorerLinks(ref, network), memBackend);
 
       // Store this turn's action log on Walrus and print its tamper-evident link.
       if (walrusAudit) {
         try {
           const ref = await walrusAudit.flush(currentSessionId);
           walrusAudit.reset();
-          if (ref) renderStored("audit trail", explorerLinks(ref, network));
+          if (ref) renderStored("memory saved", explorerLinks(ref, network));
         } catch (err: unknown) {
           renderWarning(
             `Walrus audit flush failed: ${err instanceof Error ? err.message : String(err)}`,

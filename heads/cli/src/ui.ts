@@ -259,16 +259,16 @@ export interface StoredLinks {
   object?: string;
 }
 
-export function renderStored(label: string, links: StoredLinks): void {
-  process.stdout.write(SUCCESS_COLOR("  ✓ ") + DIM(`${label} on Walrus`) + "\n");
+export function renderStored(label: string, links: StoredLinks, backend = "Walrus"): void {
+  process.stdout.write(SUCCESS_COLOR("  ✓ ") + DIM(`${label} on ${backend}`) + "\n");
   process.stdout.write(DIM(`     ${links.blob}`) + "\n");
   if (links.tx) process.stdout.write(DIM(`     tx · ${links.tx}`) + "\n");
   if (links.object) process.stdout.write(DIM(`     obj · ${links.object}`) + "\n");
 }
 
-/** A dim "saving…" hint shown while a background Walrus write is still in flight. */
-export function renderSaving(label: string): void {
-  process.stdout.write(DIM(`  ⟳ saving ${label} to Walrus…`) + "\n");
+/** A dim "saving…" hint shown while a background write is still in flight. */
+export function renderSaving(label: string, backend = "Walrus"): void {
+  process.stdout.write(DIM(`  ⟳ saving ${label} to ${backend}…`) + "\n");
 }
 
 // Streaming writer that dims `<think>…</think>` reasoning (handles tags split across chunks)
