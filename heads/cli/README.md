@@ -36,6 +36,7 @@ thiny                   # first launch runs setup, then starts chatting
 | `thiny` | Start the interactive agent. Runs first-time setup if needed. |
 | `thiny init` | (Re)run base setup — pick a model + agent name + API key. |
 | `thiny sui init` | Add Sui on-chain capabilities — pick a network + wallet. |
+| `thiny update` | Update to the latest published version (auto-detects bun/npm/pnpm). |
 | `thiny help` | Show all commands. |
 | `thiny --version` | Print the version. |
 
