@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "@thiny/core": "workspace:*",
-    "croner": "^8.1.0"
+    "croner": "^10.0.1"
   },
   "scripts": {
     "build": "tsup src/index.ts --config ../../tsup.config.ts"
