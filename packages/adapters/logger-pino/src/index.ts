@@ -99,9 +99,11 @@ export function pinoLogger(opts: PinoLoggerOptions = {}): Logger {
     );
   }
 
-  // File sink: structured JSON, async (non-blocking)
+  // File sink: structured JSON. `sync: true` — the fd is opened synchronously so a fast
+  // `process.exit()` can flush it. With async sonic-boom, exiting before the file finished
+  // opening throws "sonic boom is not ready yet" (seen on Node 25 / Bun global installs).
   if (opts.file) {
-    const destination = pino.destination({ dest: opts.file, sync: false });
+    const destination = pino.destination({ dest: opts.file, sync: true });
     return adaptPinoLogger(pino(pinoConfig(level), destination));
   }
 

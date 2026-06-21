@@ -43,8 +43,20 @@ describe("aiSdkModel — model string resolution", () => {
     ).not.toThrow();
   });
 
-  it("throws a clear error for an unknown provider prefix", () => {
-    expect(() => aiSdkModel({ model: "groq:llama3" })).toThrow(/unknown provider "groq"/);
+  it("treats an unrecognised prefix as a bare model id (no throw)", () => {
+    // "groq:llama3" is not a known provider → whole string is the model id (sent to the endpoint).
+    expect(() => aiSdkModel({ model: "groq:llama3" })).not.toThrow();
+  });
+
+  it("keeps colons inside bare model ids (Ollama-style tags)", () => {
+    // Regression: "gpt-oss:120b" must NOT be split into provider "gpt-oss" + id "120b".
+    expect(() =>
+      aiSdkModel({
+        model: "gpt-oss:120b",
+        openai: { baseURL: "http://localhost:11434/v1", apiKey: "ollama" },
+      }),
+    ).not.toThrow();
+    expect(() => aiSdkModel({ model: "llama3:8b" })).not.toThrow();
   });
 
   // ── Bare model ID (no prefix) — auto-detect from base URL ─────────────────

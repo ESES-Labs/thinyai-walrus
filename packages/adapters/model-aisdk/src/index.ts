@@ -87,46 +87,38 @@ export interface AiSdkOptions {
   maxRetries?: number;
 }
 
+const KNOWN_PROVIDERS = new Set(["openai", "openai-compat", "anthropic"]);
+
 function resolveModel(model: LanguageModel | string, opts: AiSdkOptions): LanguageModel {
   if (typeof model !== "string") return model;
 
+  // Treat the text before the first colon as a provider ONLY when it's one we recognise.
+  // Otherwise the whole string is a bare model id — crucially, ids may contain colons
+  // (e.g. Ollama's "gpt-oss:120b", "llama3:8b"), which must NOT be split into provider:id.
   const colonIdx = model.indexOf(":");
+  const prefix = colonIdx === -1 ? "" : model.slice(0, colonIdx);
 
-  // ── Bare model ID (no prefix) ────────────────────────────────────────────
-  // When the model string has no "provider:" prefix, auto-detect the provider
-  // from whichever base URL is configured:
-  //   - THINY_OPENAI_BASE_URL set  → OpenAI-compatible endpoint
-  //   - THINY_ANTHROPIC_BASE_URL set → Anthropic-compatible endpoint
-  //   - Neither set                 → standard OpenAI (default)
-  // This lets you write THINY_MODEL=mimo-v2.5-pro instead of openai-compat:mimo-v2.5-pro.
-  if (colonIdx === -1) {
-    if (opts.anthropic?.baseURL) {
-      return createAnthropic({ baseURL: opts.anthropic.baseURL, apiKey: opts.anthropic.apiKey })(
-        model,
+  if (KNOWN_PROVIDERS.has(prefix)) {
+    const modelId = model.slice(colonIdx + 1);
+    if (prefix === "anthropic") {
+      return createAnthropic({ baseURL: opts.anthropic?.baseURL, apiKey: opts.anthropic?.apiKey })(
+        modelId,
       );
     }
-    return createOpenAI({ baseURL: opts.openai?.baseURL, apiKey: opts.openai?.apiKey })(model);
-  }
-
-  const provider = model.slice(0, colonIdx);
-  const modelId = model.slice(colonIdx + 1);
-
-  if (provider === "openai" || provider === "openai-compat") {
     return createOpenAI({ baseURL: opts.openai?.baseURL, apiKey: opts.openai?.apiKey })(modelId);
   }
 
-  if (provider === "anthropic") {
-    return createAnthropic({ baseURL: opts.anthropic?.baseURL, apiKey: opts.anthropic?.apiKey })(
-      modelId,
+  // ── Bare model ID ─────────────────────────────────────────────────────────
+  // Auto-detect the provider from whichever base URL is configured:
+  //   - THINY_OPENAI_BASE_URL set    → OpenAI-compatible endpoint (Ollama, Groq, vLLM, …)
+  //   - THINY_ANTHROPIC_BASE_URL set → Anthropic-compatible endpoint
+  //   - Neither set                  → standard OpenAI (default)
+  if (opts.anthropic?.baseURL) {
+    return createAnthropic({ baseURL: opts.anthropic.baseURL, apiKey: opts.anthropic.apiKey })(
+      model,
     );
   }
-
-  throw new Error(
-    `unknown provider "${provider}" in model string "${model}"\n` +
-      `Supported prefixes: "openai:<id>", "openai-compat:<id>", "anthropic:<id>"\n` +
-      `Or omit the prefix and set THINY_OPENAI_BASE_URL / THINY_ANTHROPIC_BASE_URL instead.\n` +
-      `Or pass a LanguageModel instance directly.`,
-  );
+  return createOpenAI({ baseURL: opts.openai?.baseURL, apiKey: opts.openai?.apiKey })(model);
 }
 
 /**
