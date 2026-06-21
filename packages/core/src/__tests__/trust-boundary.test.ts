@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
 import {
   policyMiddleware,
   budgetMiddleware,
@@ -10,10 +11,9 @@ import {
 describe("Trust boundary — policy deny/approve", () => {
   it("denyApprover returns false for any approval request", async () => {
     const result = await denyApprover({
-      id: "call_1",
       tool: "send_eth",
       args: { to: "0xabc", value: "1.0" },
-      sensitive: false,
+      reason: "sensitive tool",
     });
     expect(result).toBe(false);
   });
@@ -21,10 +21,9 @@ describe("Trust boundary — policy deny/approve", () => {
   it("autoApprover allows non-sensitive permitted tools", async () => {
     const approver = autoApprover(["eth_balance", "get_price"]);
     const result = await approver({
-      id: "call_1",
       tool: "eth_balance",
       args: { address: "0xabc" },
-      sensitive: false,
+      reason: "read-only",
     });
     expect(result).toBe(true);
   });
@@ -32,10 +31,9 @@ describe("Trust boundary — policy deny/approve", () => {
   it("autoApprover blocks tools not in allowlist", async () => {
     const approver = autoApprover(["eth_balance"]);
     const result = await approver({
-      id: "call_1",
       tool: "send_eth",
       args: { to: "0xabc", value: "1.0" },
-      sensitive: false,
+      reason: "not on allowlist",
     });
     expect(result).toBe(false);
   });
@@ -58,7 +56,7 @@ describe("Trust boundary — budget circuit breaker", () => {
 
 describe("Trust boundary — simulate middleware", () => {
   it("simulateMiddleware creates a middleware function", () => {
-    const mw = simulateMiddleware();
+    const mw = simulateMiddleware(() => Promise.resolve({ success: true }));
     expect(mw).toBeDefined();
     expect(typeof mw).toBe("function");
   });
@@ -66,29 +64,28 @@ describe("Trust boundary — simulate middleware", () => {
 
 describe("Trust boundary — policy middleware", () => {
   it("policyMiddleware creates a middleware function", () => {
-    const mw = policyMiddleware({ rules: [] });
+    const mw = policyMiddleware([]);
     expect(mw).toBeDefined();
     expect(typeof mw).toBe("function");
   });
 
   it("policyMiddleware accepts deny rules", () => {
-    const mw = policyMiddleware({
-      rules: [{ tool: "send_eth", action: "deny" as const }],
-    });
+    const mw = policyMiddleware([
+      (call) => (call.tool.name === "send_eth" ? { effect: "deny", reason: "blocked" } : null),
+    ]);
     expect(mw).toBeDefined();
   });
 
   it("policyMiddleware accepts approve rules", () => {
-    const mw = policyMiddleware({
-      rules: [{ tool: "eth_balance", action: "approve" as const }],
-    });
+    const mw = policyMiddleware([
+      (call) => (call.tool.name === "eth_balance" ? { effect: "approve", reason: "read-only" } : null),
+    ]);
     expect(mw).toBeDefined();
   });
 });
 
 describe("Trust boundary — Zod validation of tool args (LLM output boundary)", () => {
   it("validates that tool args from LLM are schema-conformant", () => {
-    const { z } = require("zod");
 
     const SendEthSchema = z.object({
       to: z.string().startsWith("0x"),
@@ -107,7 +104,6 @@ describe("Trust boundary — Zod validation of tool args (LLM output boundary)",
   });
 
   it("rejects non-object input to tool call args", () => {
-    const { z } = require("zod");
     const schema = z.object({ address: z.string() });
 
     expect(schema.safeParse("not-an-object").success).toBe(false);
@@ -116,7 +112,6 @@ describe("Trust boundary — Zod validation of tool args (LLM output boundary)",
   });
 
   it("rejects args with wrong types", () => {
-    const { z } = require("zod");
     const schema = z.object({
       to: z.string(),
       value: z.number().positive(),

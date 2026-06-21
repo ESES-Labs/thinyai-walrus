@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { Ctx } from "@thiny/core";
+import type { Ctx, SpawnOptions } from "@thiny/core";
 import { agentsPlugin, PLAN_STATE_KEY, type PlanStep } from "../index.js";
 
 function getTool(plugin: ReturnType<typeof agentsPlugin>, name: string) {
@@ -19,7 +19,7 @@ function fakeCtx(spawn?: Ctx["spawn"]): Ctx {
 
 describe("delegate_task", () => {
   it("spawns a sub-agent with the task and returns its result", async () => {
-    const spawn = vi.fn(async () => "sub-agent answer");
+    const spawn = vi.fn<[SpawnOptions], Promise<string>>(() => Promise.resolve("sub-agent answer"));
     const tool = getTool(agentsPlugin(), "delegate_task");
     const out = (await tool.execute({ task: "summarise X" }, fakeCtx(spawn))) as {
       agent: string;
@@ -31,7 +31,7 @@ describe("delegate_task", () => {
   });
 
   it("uses a named sub-agent's system prompt and folds context into the input", async () => {
-    const spawn = vi.fn(async () => "ok");
+    const spawn = vi.fn<[SpawnOptions], Promise<string>>(() => Promise.resolve("ok"));
     const plugin = agentsPlugin({
       subagents: { researcher: { description: "web research", systemPrompt: "You research." } },
     });
