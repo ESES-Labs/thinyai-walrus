@@ -76,5 +76,8 @@
     "*.{json,md,yml,yaml,js,cjs,mjs}": [
       "prettier --write"
     ]
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.6.0"
   }
 }

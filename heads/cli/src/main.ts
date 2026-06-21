@@ -431,7 +431,15 @@ async function main(): Promise<void> {
       }
     } catch (err: unknown) {
       spinner.stop();
-      renderError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      // A model/endpoint misconfig (wrong model id, base URL, or key) surfaces as an API error —
+      // point the user at where to fix it instead of leaving them guessing.
+      const looksLikeModelError = /\b(model|api|channel|base ?url|unauthorized|not found|invalid|401|404)\b/i.test(msg);
+      renderError(
+        looksLikeModelError
+          ? `${msg}\n  ↳ Check your model, base URL, and API key (run \`thiny init\`, or edit ~/.thiny/config.json / .env).`
+          : msg,
+      );
     }
   }
 }
