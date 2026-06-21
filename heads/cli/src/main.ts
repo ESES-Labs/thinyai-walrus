@@ -36,11 +36,12 @@ import {
   type WalrusNetwork,
 } from "@thiny/walrus";
 import { agentsPlugin } from "@thiny/plugin-agents";
-import { suiSigner, type SuiNetwork } from "@thiny/signer-sui";
+import { suiSigner, type SuiNetwork, type SuiSigner } from "@thiny/signer-sui";
 import { suiPlugin } from "@thiny/plugin-sui";
 import { mcpHttpPlugin } from "@thiny/mcp";
 import type { Logger, Plugin } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
+import { loadConfig, saveConfig } from "./onboarding.js";
 import { loadSkills } from "./skills.js";
 import {
   clearScreen,
@@ -210,29 +211,80 @@ export async function runCli(): Promise<void> {
     ? { name: process.env.THINY_PERSONA_NAME, description: process.env.THINY_PERSONA_DESCRIPTION }
     : undefined;
 
-  // Sui execution: wired in when a key is configured (via `thiny sui init` or SUI_SECRET_KEY).
-  // Gives the agent sui_balance / sui_object / sui_execute_ptb; mcpHttpPlugin adds Rill's tools
-  // (which build the unsigned PTBs the agent then signs) when a Rill MCP URL is set.
-  const suiKey = process.env.SUI_SECRET_KEY ?? process.env.THINY_SUI_SECRET_KEY;
+  // Sui execution. The signer is held in a mutable ref so the agent can create/import a wallet
+  // mid-session via the sui_setup tool (no restart). The Sui read/exec tools are ALWAYS registered;
+  // until a wallet exists they tell the user (and the agent) to run sui_setup.
+  const allowMainnet = process.env.SUI_ALLOW_MAINNET === "1";
   const suiNetwork: SuiNetwork = process.env.SUI_NETWORK === "mainnet" ? "mainnet" : "testnet";
+  const suiKey0 = process.env.SUI_SECRET_KEY ?? process.env.THINY_SUI_SECRET_KEY;
+  let suiSignerRef: SuiSigner | null = suiKey0
+    ? suiSigner({ network: suiNetwork, secretKey: suiKey0, allowMainnet })
+    : null;
+
+  // Rill MCP (its PTB-builder tools) connects at startup when a URL is configured.
   const suiPlugins: Plugin[] = [];
-  let suiAddress: string | undefined;
-  if (suiKey) {
-    const signer = suiSigner({
-      network: suiNetwork,
-      secretKey: suiKey,
-      allowMainnet: process.env.SUI_ALLOW_MAINNET === "1",
-    });
-    suiAddress = signer.address;
-    suiPlugins.push(suiPlugin({ signer }));
-    if (process.env.MCP_URL) {
-      try {
-        suiPlugins.push(await mcpHttpPlugin({ url: process.env.MCP_URL, name: "rill" }));
-      } catch (err: unknown) {
-        renderWarning(`Rill MCP unavailable: ${err instanceof Error ? err.message : String(err)}`);
-      }
+  if (process.env.MCP_URL) {
+    try {
+      suiPlugins.push(await mcpHttpPlugin({ url: process.env.MCP_URL, name: "rill" }));
+    } catch (err: unknown) {
+      renderWarning(`Rill MCP unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  // Lets the agent set up Sui from chat: "create a wallet" / "enable sui" / "import my key".
+  const suiSetupTool = defineTool({
+    name: "sui_setup",
+    description:
+      "Set up or change the agent's Sui wallet so it can read balances and sign transactions. " +
+      "Use when the user asks to enable Sui, create/import a wallet, or switch network. Modes: " +
+      "generate (new local key), import (a suiprivkey…), rill (use a Rill MCP signer URL). Takes " +
+      "effect immediately; Rill's builder tools connect on the next start. Always remind the user to " +
+      "fund the returned address.",
+    sensitive: true,
+    parameters: z.object({
+      network: z.enum(["testnet", "mainnet"]).default("testnet"),
+      wallet: z
+        .enum(["generate", "import", "rill"])
+        .describe("generate a new key, import a suiprivkey…, or use a Rill MCP signer"),
+      secretKey: z.string().optional().describe("suiprivkey… — required when wallet=import"),
+      rillMcpUrl: z.string().optional().describe("Rill MCP URL — used when wallet=rill"),
+    }),
+    execute: async ({ network: net, wallet, secretKey, rillMcpUrl }) => {
+      const network: SuiNetwork = net === "mainnet" ? "mainnet" : "testnet";
+      const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+      let sk: string;
+      let address: string;
+      if (wallet === "import") {
+        if (!secretKey?.startsWith("suiprivkey")) {
+          throw new Error("sui_setup: import requires a `secretKey` starting with suiprivkey…");
+        }
+        sk = secretKey;
+        address = Ed25519Keypair.fromSecretKey(sk).getPublicKey().toSuiAddress();
+      } else {
+        const kp = Ed25519Keypair.generate();
+        sk = kp.getSecretKey();
+        address = kp.getPublicKey().toSuiAddress();
+      }
+      const cfg = loadConfig() ?? {};
+      cfg.sui = {
+        network,
+        address,
+        wallet: { type: wallet === "import" ? "imported" : "generated", secretKey: sk },
+      };
+      if (wallet === "rill" && rillMcpUrl) cfg.sui.rillMcpUrl = rillMcpUrl;
+      saveConfig(cfg);
+      suiSignerRef = suiSigner({ network, secretKey: sk, allowMainnet });
+      return {
+        ok: true,
+        network,
+        address,
+        note:
+          `Sui wallet ready on ${network} at ${address}. The user MUST fund this address before sending transactions` +
+          (network === "testnet" ? " (faucet: https://faucet.sui.io)." : ".") +
+          (wallet === "rill" ? " Rill MCP URL saved — restart thiny to connect its builder tools." : ""),
+      };
+    },
+  });
 
   // Create budget middleware separately so we can reset it per turn.
   // budgetMiddleware counters accumulate across calls — without reset() every
@@ -252,15 +304,16 @@ export async function runCli(): Promise<void> {
       "If asked what you remember, answer from the injected user memory (or call recall_memory). " +
       "You DO remember across sessions — never say you lack memory or that each session starts fresh.\n\n" +
       "For multi-step work, call update_plan to track steps and delegate_task to hand focused " +
-      "sub-problems to a sub-agent." +
-      (suiKey
-        ? `\n\nSUI: You have a Sui wallet on ${suiNetwork} at ${suiAddress ?? "(unknown)"}. ` +
-          "Use sui_balance to read balances and sui_object to inspect objects. To send a transaction " +
-          "you need an UNSIGNED PTB (e.g. built by a connected MCP/Rill tool); pass it to " +
-          "sui_execute_ptb, which simulates, applies caps, and signs it. Never claim you cannot " +
-          "transact on Sui — you can, via these tools."
-        : ""),
-    tools: [echoTool],
+      "sub-problems to a sub-agent.\n\n" +
+      "SUI: You can operate on the Sui blockchain. " +
+      (suiSignerRef
+        ? `A wallet is configured on ${suiNetwork} at ${suiSignerRef.address ?? "(unknown)"}. `
+        : "No wallet is set up yet — when the user wants Sui, call sui_setup (generate / import / rill) " +
+          "to create or connect one, then tell them to fund the returned address. ") +
+      "Use sui_balance to read balances and sui_object to inspect objects. To SEND a transaction you " +
+      "need an UNSIGNED PTB built by a builder (e.g. a connected Rill MCP tool); pass it to " +
+      "sui_execute_ptb, which simulates, applies caps, and signs. Never claim you cannot use Sui — you can.",
+    tools: [echoTool, suiSetupTool],
     plugins: [
       {
         name: "observability",
@@ -269,7 +322,8 @@ export async function runCli(): Promise<void> {
       },
       agentsPlugin(),
       memoryPlugin,
-      ...suiPlugins,
+      suiPlugin({ signer: () => suiSignerRef }), // always present; tools guide setup if no wallet
+      ...suiPlugins, // Rill MCP builder tools (if connected)
       ...skillPlugins,
     ],
   });
@@ -319,11 +373,11 @@ export async function runCli(): Promise<void> {
   );
   if (walrusAudit)
     renderInfo(`Walrus audit: ON (${network}) — each turn's action log is stored + verifiable`);
-  if (suiKey)
+  if (suiSignerRef)
     renderInfo(
-      `Sui: ${suiNetwork} · ${suiAddress ?? "?"}${process.env.MCP_URL ? " · Rill MCP connected" : ""}`,
+      `Sui: ${suiNetwork} · ${suiSignerRef.address ?? "?"}${process.env.MCP_URL ? " · Rill MCP connected" : ""}`,
     );
-  else renderInfo("Sui: not configured — run `thiny sui init` to add on-chain capabilities");
+  else renderInfo("Sui: no wallet — ask the agent to set one up, or run `thiny sui init`");
 
   // REPL
   const rl = createInterface({ input: stdin, output: stdout });

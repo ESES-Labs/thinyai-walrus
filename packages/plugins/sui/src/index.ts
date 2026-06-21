@@ -25,8 +25,12 @@ export interface SuiExecPolicy {
 }
 
 export interface SuiPluginOptions {
-  /** The Sui signer (from `@thiny/signer-sui`) — holds the key + RPC client. */
-  signer: SuiSigner;
+  /**
+   * The Sui signer (from `@thiny/signer-sui`) — holds the key + RPC client.
+   * Pass a getter to resolve it lazily (e.g. a wallet configured at runtime via a setup tool);
+   * the tools call it on each use and surface a friendly message until a wallet exists.
+   */
+  signer: SuiSigner | (() => SuiSigner | null | undefined);
   /** Soft pre-sign policy. */
   policy?: SuiExecPolicy;
   /** Optional approval gate before signing (human or headless). */
@@ -44,7 +48,19 @@ function explorerTxUrl(network: string, digest: string): string {
 
 /** Sui plugin: balance/object reads + the gated `sui_execute_ptb`. */
 export function suiPlugin(opts: SuiPluginOptions): Plugin {
-  const { signer } = opts;
+  const sig = opts.signer;
+  const resolve: () => SuiSigner | null | undefined =
+    typeof sig === "function" ? sig : () => sig;
+  /** Get the active signer, or throw a clear, agent-actionable message if none is set up yet. */
+  const signerOrThrow = (): SuiSigner => {
+    const s = resolve();
+    if (!s) {
+      throw new Error(
+        "No Sui wallet configured yet. Call sui_setup to create or import one (or tell the user to run `thiny sui init`).",
+      );
+    }
+    return s;
+  };
   const requireSimSuccess = opts.policy?.requireSimSuccess ?? true;
 
   const balance = defineTool({
@@ -57,6 +73,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
       coinType: z.string().optional().describe("Coin type, e.g. 0x2::sui::SUI (default: SUI)."),
     }),
     execute: async ({ address, coinType }) => {
+      const signer = signerOrThrow();
       const owner = address ?? signer.address;
       if (owner === undefined) {
         throw new Error("sui_balance: no address given and the signer has no key/address.");
@@ -76,6 +93,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
     description: "Read a Sui object's type and fields by id.",
     parameters: z.object({ objectId: z.string().min(1).describe("The object id (0x…).") }),
     execute: async ({ objectId }) => {
+      const signer = signerOrThrow();
       const res = await signer.client.getObject({
         id: objectId,
         options: { showContent: true, showType: true, showOwner: true },
@@ -105,6 +123,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         .describe("The builder's unsigned PTB — base64 of a serialized Sui transaction."),
     }),
     execute: async ({ unsignedPtb }) => {
+      const signer = signerOrThrow();
       // 1. Deserialize: Rill sends base64 of the serialized tx (`Buffer.from(tx.serialize()).toString("base64")`);
       //    decode, then rebuild. The signer adds sender + gas at sign time.
       const tx = Transaction.from(Buffer.from(unsignedPtb, "base64").toString("utf8"));

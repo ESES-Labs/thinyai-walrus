@@ -39,7 +39,7 @@ export function loadConfig(): ThinyConfig | null {
   return existsSync(CONFIG) ? (JSON.parse(readFileSync(CONFIG, "utf8")) as ThinyConfig) : null;
 }
 
-function saveConfig(cfg: ThinyConfig): void {
+export function saveConfig(cfg: ThinyConfig): void {
   mkdirSync(THINY_DIR, { recursive: true });
   chmodSync(THINY_DIR, 0o700);
   writeFileSync(CONFIG, JSON.stringify(cfg, null, 2));

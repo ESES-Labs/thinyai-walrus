@@ -1,10 +1,17 @@
 ---
+"@thiny/plugin-sui": minor
 "thinyai": minor
 ---
 
-Wire the Sui execution layer into the CLI agent. Previously `thiny sui init` saved a wallet but the
-agent never gained any Sui tools. Now, when a Sui key is configured (via `thiny sui init` or
-`SUI_SECRET_KEY`), the CLI builds a `suiSigner` and registers `suiPlugin` — giving the agent
-`sui_balance`, `sui_object`, and the gated `sui_execute_ptb`. If a Rill MCP URL is set, `mcpHttpPlugin`
-is added too (its tools build the unsigned PTBs the agent signs). The system prompt tells the agent it
-can transact on Sui, and a startup line shows `Sui: <network> · <address>`.
+Give the CLI agent full, self-service Sui capability.
+
+- The Sui tools (`sui_balance`, `sui_object`, `sui_execute_ptb`) are **always registered** — until a
+  wallet exists they tell the agent/user to run setup.
+- New **`sui_setup`** tool lets the agent configure Sui **from chat** ("create a wallet" / "enable
+  sui" / "import my key"): modes `generate` (new local key), `import` (a `suiprivkey…`), or `rill`
+  (save a Rill MCP signer URL). It persists to `~/.thiny/config.json` and activates **in-session**
+  (no restart) for the local agent wallet.
+- `suiPlugin` now accepts a signer **getter** (`signer: SuiSigner | (() => SuiSigner | null)`), so the
+  signer can be set/swapped at runtime.
+- When a Rill MCP URL is set, `mcpHttpPlugin` connects its PTB-builder tools at startup. The system
+  prompt and a startup line surface the wallet/network/address.
