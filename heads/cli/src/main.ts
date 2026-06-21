@@ -273,6 +273,11 @@ async function main(): Promise<void> {
   const rl = createInterface({ input: stdin, output: stdout });
   const spinner = new Spinner();
 
+  // Memory writes are backgrounded for speed; flush any in-flight write on exit (EOF/Ctrl-D throws
+  // out of the loop) so the last fact reliably lands on Walrus.
+  const flushMemory = (memoryPlugin as { flush?: () => Promise<void> }).flush;
+
+  try {
   for (;;) {
     const input = await rl.question("\x1b[36mYou\x1b[0m \x1b[2m›\x1b[0m ");
     const trimmed = input.trim();
@@ -441,6 +446,9 @@ async function main(): Promise<void> {
           : msg,
       );
     }
+  }
+  } finally {
+    if (flushMemory) await flushMemory().catch(() => undefined);
   }
 }
 

@@ -236,6 +236,7 @@ describe("walrusMemoryPlugin (cross-session memory, default)", () => {
       { fact: "User's name is Alice", kind: "fact" },
       {} as never,
     );
+    await a.flush(); // the Walrus write is backgrounded; await it for the durability assertion
     expect(stored).toHaveLength(1);
 
     // Session B: a brand-new plugin instance (fresh cache), same Walrus + pointer.

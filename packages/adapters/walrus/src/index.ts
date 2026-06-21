@@ -451,33 +451,52 @@ function emptyFacts(userId: string): WalrusFacts {
  * walrusMemoryPlugin({ client: walrusClient(), pointers: filePointerStore("pointers.json"), userId })
  * ```
  */
-export function walrusMemoryPlugin(opts: WalrusMemoryPluginOptions): Plugin {
+export function walrusMemoryPlugin(
+  opts: WalrusMemoryPluginOptions,
+): Plugin & { flush: () => Promise<void> } {
   const key = `facts:${opts.userId}`;
   const maxFacts = opts.maxFacts ?? 50;
   let cache: WalrusFacts | undefined; // avoids a Walrus GET on every model call within a process
+  let loading: Promise<WalrusFacts> | undefined; // de-dupes concurrent first loads
+  let pending: Promise<void> = Promise.resolve(); // serialises background writes
 
   async function load(): Promise<WalrusFacts> {
     if (cache) return cache;
-    try {
-      const blobId = await opts.pointers.get(key);
-      cache =
-        blobId === undefined
-          ? emptyFacts(opts.userId)
-          : (JSON.parse(
-              new TextDecoder().decode(await opts.client.getBlob(blobId)),
-            ) as WalrusFacts);
-    } catch {
-      cache = emptyFacts(opts.userId); // resilient — never break a turn on a Walrus error
-    }
-    return cache;
+    loading ??= (async () => {
+      try {
+        const blobId = await opts.pointers.get(key);
+        cache =
+          blobId === undefined
+            ? emptyFacts(opts.userId)
+            : (JSON.parse(
+                new TextDecoder().decode(await opts.client.getBlob(blobId)),
+              ) as WalrusFacts);
+      } catch {
+        cache = emptyFacts(opts.userId); // resilient — never break a turn on a Walrus error
+      }
+      return cache;
+    })();
+    return loading;
   }
 
-  async function save(facts: WalrusFacts): Promise<void> {
+  // The cache update is synchronous (recall/context see it immediately); the Walrus PUT runs in the
+  // background so a turn never blocks on a network upload. Writes are chained to avoid racing the
+  // pointer. ponytail: a fact saved microseconds before process exit may not finish uploading — the
+  // prior facts still persist; upgrade to an awaited flush-on-exit if last-write durability matters.
+  function save(facts: WalrusFacts): void {
     cache = facts;
-    const ref = await opts.client.putBlob(JSON.stringify(facts));
-    await opts.pointers.set(key, ref.blobId);
-    opts.onStore?.(ref);
+    pending = pending.then(async () => {
+      try {
+        const ref = await opts.client.putBlob(JSON.stringify(facts));
+        await opts.pointers.set(key, ref.blobId);
+        opts.onStore?.(ref);
+      } catch {
+        /* best-effort durability — never surface a Walrus error into the turn */
+      }
+    });
   }
+
+  void load(); // warm the cache at startup so the first turn isn't blocked on a GET
 
   const contextMiddleware: ModelMiddleware = async (req, next) => {
     const mem = await load();
@@ -498,6 +517,8 @@ export function walrusMemoryPlugin(opts: WalrusMemoryPluginOptions): Plugin {
 
   return {
     name: "walrus-memory",
+    // Await any in-flight background write — call before exit for last-write durability.
+    flush: () => pending,
     modelMiddleware: [contextMiddleware],
     tools: [
       defineTool({
@@ -517,7 +538,7 @@ export function walrusMemoryPlugin(opts: WalrusMemoryPluginOptions): Plugin {
             if (list.length > maxFacts) list.shift();
           }
           mem.updatedAt = new Date().toISOString();
-          await save(mem);
+          save(mem); // background write — the turn continues immediately
           return {
             stored: fact,
             kind,
