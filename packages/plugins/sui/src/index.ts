@@ -65,30 +65,35 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
 
   // Shared gated path for every transaction the plugin signs (built here or received as a PTB):
   // re-simulate → soft policy → approval gate → sign + submit.
+  // Returns a clean result object on failure (never throws) so a weak model relays it instead of
+  // looping. Success → { digest, … }; failure → { ok: false, message }.
   const executeTx = async (
     signer: SuiSigner,
     tx: Transaction,
     toolName: string,
     approvalArgs: Record<string, unknown>,
     reason: string,
-  ): Promise<{ digest: string; effects: unknown; explorerUrl: string }> => {
+  ): Promise<
+    { digest: string; effects: unknown; explorerUrl: string } | { ok: false; message: string }
+  > => {
     const sim = await signer.devInspect(tx);
     const status = sim.effects.status.status;
     if (requireSimSuccess && status !== "success") {
-      throw new Error(`${toolName}: simulation failed (${sim.effects.status.error ?? status})`);
+      return { ok: false, message: `Simulation failed: ${sim.effects.status.error ?? status}` };
     }
     if (opts.policy?.maxGasBudgetMist !== undefined) {
       const gas = sim.effects.gasUsed as GasUsed;
       const estGas = BigInt(gas.computationCost) + BigInt(gas.storageCost);
       if (estGas > opts.policy.maxGasBudgetMist) {
-        throw new Error(
-          `${toolName}: estimated gas ${estGas.toString()} MIST exceeds policy cap ${opts.policy.maxGasBudgetMist.toString()}.`,
-        );
+        return {
+          ok: false,
+          message: `Estimated gas ${estGas.toString()} MIST exceeds the cap ${opts.policy.maxGasBudgetMist.toString()}.`,
+        };
       }
     }
     if (opts.approver) {
       const ok = await opts.approver({ tool: toolName, args: approvalArgs, reason });
-      if (!ok) throw new Error(`${toolName}: rejected by approver.`);
+      if (!ok) return { ok: false, message: "Rejected at the approval gate." };
     }
     const { digest, effects } = await signer.signAndExecute(tx);
     return { digest, effects, explorerUrl: explorerTxUrl(signer.network, digest) };
@@ -169,35 +174,69 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
   const transfer = defineTool({
     name: "sui_transfer",
     description:
-      "Build, sign, and submit a coin transfer: send an amount of SUI (or any coin type) to an " +
-      "address. Amounts are in MIST (1 SUI = 1,000,000,000 MIST). Use this for simple sends.",
+      "Send an amount of a coin to an address. Amounts are in MIST (1 SUI = 1,000,000,000 MIST). " +
+      "coinType may be the full type, a symbol (e.g. USDC), or omitted for SUI — it's matched against " +
+      "the coins you actually hold. Recipient must be a 0x… Sui address.",
     sensitive: true,
     parameters: z.object({
-      recipient: z.string().min(1).describe("Destination address (0x…)."),
+      recipient: z.string().min(1).describe("Destination 0x… Sui address."),
       amountMist: z.string().min(1).describe('Amount in MIST. e.g. "1000000000" = 1 SUI.'),
-      coinType: z.string().optional().describe("Coin type (default 0x2::sui::SUI)."),
+      coinType: z
+        .string()
+        .optional()
+        .describe("Full coin type, a symbol like USDC, or omit for SUI."),
     }),
     execute: async ({ recipient, amountMist, coinType }) => {
       const signer = resolve();
       if (!signer) return SETUP_NEEDED;
-      const amount = BigInt(amountMist);
-      const type = coinType ?? "0x2::sui::SUI";
+      if (!/^0x[0-9a-fA-F]+$/.test(recipient)) {
+        return { ok: false, message: `Recipient "${recipient}" is not a valid 0x… Sui address.` };
+      }
+      let amount: bigint;
+      try {
+        amount = BigInt(amountMist);
+      } catch {
+        return { ok: false, message: `Amount "${amountMist}" must be an integer in MIST.` };
+      }
       const tx = new Transaction();
-      if (type.endsWith("::sui::SUI")) {
+
+      if (!coinType || coinType.endsWith("::sui::SUI") || coinType.toLowerCase() === "sui") {
         // SUI: split straight from the gas coin.
         const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(amount)]);
         tx.transferObjects([coin], tx.pure.address(recipient));
       } else {
-        // Other coins: gather the sender's coins of this type, merge, split the exact amount.
         const owner = signer.address;
         if (owner === undefined) return { ok: false, message: "Wallet has no address. Run sui_setup." };
-        const { data } = await signer.client.getCoins({ owner, coinType: type });
-        const [first, ...rest] = data;
-        if (!first) throw new Error(`sui_transfer: no ${type} coins owned by ${owner}.`);
-        const primary = tx.object(first.coinObjectId);
-        if (rest.length > 0) {
-          tx.mergeCoins(primary, rest.map((c) => tx.object(c.coinObjectId)));
+        // Resolve the requested coin against what's actually held — the input may be a symbol,
+        // a partial/truncated type, or the package address rather than the full `pkg::mod::Struct`.
+        const owned = (await signer.client.getAllBalances({ owner })).filter(
+          (b) => BigInt(b.totalBalance) > 0n,
+        );
+        const q = coinType.toLowerCase();
+        const match =
+          owned.find((b) => b.coinType.toLowerCase() === q) ??
+          owned.find((b) => (b.coinType.split("::").pop() ?? "").toLowerCase() === q) ??
+          owned.filter((b) => b.coinType.toLowerCase().startsWith(q) || b.coinType.toLowerCase().includes(q));
+        const resolved = Array.isArray(match) ? (match.length === 1 ? match[0] : undefined) : match;
+        if (!resolved) {
+          const held = owned.map((b) => b.coinType).join(", ") || "(no coins)";
+          return {
+            ok: false,
+            message: `Couldn't match coin "${coinType}". You hold: ${held}. Retry with one of those exact coin types.`,
+          };
         }
+        const { data } = await signer.client.getCoins({ owner, coinType: resolved.coinType });
+        const [primaryCoin, ...rest] = data;
+        if (!primaryCoin) {
+          // Balance index says you hold it, but the object index returns no coins — a stale/lagging
+          // RPC node, or the coins are locked (staked/in an object). Don't retry; surface it plainly.
+          return {
+            ok: false,
+            message: `Your balance shows ${resolved.totalBalance} ${resolved.coinType}, but the RPC returned no spendable coin objects (the node's coin index may be lagging, or the coins are locked). Try again shortly or switch RPC.`,
+          };
+        }
+        const primary = tx.object(primaryCoin.coinObjectId);
+        if (rest.length > 0) tx.mergeCoins(primary, rest.map((c) => tx.object(c.coinObjectId)));
         const [coin] = tx.splitCoins(primary, [tx.pure.u64(amount)]);
         tx.transferObjects([coin], tx.pure.address(recipient));
       }
@@ -205,8 +244,8 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         signer,
         tx,
         "sui_transfer",
-        { recipient, amountMist, coinType: type },
-        `transfer ${amountMist} MIST of ${type} to ${recipient}`,
+        { recipient, amountMist, coinType: coinType ?? "SUI" },
+        `transfer ${amountMist} MIST of ${coinType ?? "SUI"} to ${recipient}`,
       );
     },
   });

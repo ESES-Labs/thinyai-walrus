@@ -89,24 +89,24 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
     const tx = new Transaction();
     tx.splitCoins(tx.gas, [tx.pure.u64(1)]);
     const ptb = await tx.toJSON();
-    await expect(
-      tool({ signer: keyless(), policy: { maxGasBudgetMist: 1n } }, "sui_execute_ptb").execute(
-        { unsignedTx: ptb },
-        {} as never,
-      ),
-    ).rejects.toThrow(/exceeds policy cap/);
+    const r = (await tool({ signer: keyless(), policy: { maxGasBudgetMist: 1n } }, "sui_execute_ptb").execute(
+      { unsignedTx: ptb },
+      {} as never,
+    )) as { ok?: boolean; message?: string };
+    expect(r.ok).toBe(false); // returns a clean result (no throw → no model loop)
+    expect(r.message).toMatch(/exceeds the cap/i);
   });
 
   it("sui_execute_ptb honors the approval gate after a real sim", async () => {
     const tx = new Transaction();
     tx.splitCoins(tx.gas, [tx.pure.u64(1)]);
     const ptb = await tx.toJSON();
-    await expect(
-      tool(
-        { signer: keyless(), approver: () => Promise.resolve(false) },
-        "sui_execute_ptb",
-      ).execute({ unsignedTx: ptb }, {} as never),
-    ).rejects.toThrow(/rejected by approver/);
+    const r = (await tool(
+      { signer: keyless(), approver: () => Promise.resolve(false) },
+      "sui_execute_ptb",
+    ).execute({ unsignedTx: ptb }, {} as never)) as { ok?: boolean; message?: string };
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/approval/i);
   });
 
   it("sui_execute_ptb blocks a PTB that fails simulation (requireSimSuccess)", async () => {
@@ -114,8 +114,11 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
     // A call into a non-existent package → the dry-run does not predict success.
     tx.moveCall({ target: `0x${"0".repeat(63)}9::nope::nope` });
     const ptb = await tx.toJSON();
-    await expect(
-      tool({ signer: keyless() }, "sui_execute_ptb").execute({ unsignedTx: ptb }, {} as never),
-    ).rejects.toThrow();
+    const r = (await tool({ signer: keyless() }, "sui_execute_ptb").execute(
+      { unsignedTx: ptb },
+      {} as never,
+    )) as { ok?: boolean; message?: string };
+    expect(r.ok).toBe(false);
+    expect(r.message).toMatch(/simulation failed/i);
   });
 });
