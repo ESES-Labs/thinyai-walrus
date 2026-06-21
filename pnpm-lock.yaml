@@ -204,6 +204,9 @@ importers:
       '@thiny/plugin-sui':
         specifier: workspace:*
         version: link:../../packages/plugins/sui
+      '@thiny/plugin-web-search':
+        specifier: workspace:*
+        version: link:../../packages/plugins/web-search
       '@thiny/signer-sui':
         specifier: workspace:*
         version: link:../../packages/adapters/signer-sui

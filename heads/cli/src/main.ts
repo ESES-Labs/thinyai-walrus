@@ -39,6 +39,7 @@ import { agentsPlugin } from "@thiny/plugin-agents";
 import { suiSigner, type SuiNetwork, type SuiSigner } from "@thiny/signer-sui";
 import { suiPlugin } from "@thiny/plugin-sui";
 import { mcpHttpPlugin } from "@thiny/mcp";
+import { webSearchPlugin } from "@thiny/plugin-web-search";
 import type { Logger, Plugin } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
 import { loadConfig, saveConfig, version } from "./onboarding.js";
@@ -319,6 +320,47 @@ export async function runCli(): Promise<void> {
     },
   });
 
+  // Fetch any URL the user shares (skill.md, docs, JSON, an API/MCP endpoint, …) so the agent can
+  // actually read it instead of saying it can't open links.
+  // ponytail: a local CLI runs with the user's own network access — no SSRF allowlist; add one if
+  // this ever runs as a hosted/multi-tenant service.
+  const fetchUrlTool = defineTool({
+    name: "fetch_url",
+    description:
+      "Fetch the contents of an http(s) URL (markdown, text, JSON, HTML). ALWAYS use this when the " +
+      "user shares a link — e.g. a skill.md, docs page, or an API/MCP endpoint — instead of saying " +
+      "you can't open URLs. Returns the response text (truncated if very large).",
+    parameters: z.object({
+      url: z.string().url().describe("The http(s) URL to fetch."),
+      maxChars: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Max characters of body to return (default 20000)."),
+    }),
+    execute: async ({ url, maxChars }) => {
+      const limit = maxChars ?? 20000;
+      const res = await fetch(url, {
+        headers: { "user-agent": "thiny-cli", accept: "*/*" },
+        signal: AbortSignal.timeout(15000),
+      });
+      const body = await res.text();
+      return {
+        url,
+        status: res.status,
+        contentType: res.headers.get("content-type") ?? "",
+        truncated: body.length > limit,
+        content: body.slice(0, limit),
+      };
+    },
+  });
+
+  // Web search is on automatically when a Brave key is present (else the agent uses fetch_url only).
+  const webPlugins: Plugin[] = process.env.BRAVE_API_KEY
+    ? [webSearchPlugin({ apiKey: process.env.BRAVE_API_KEY })]
+    : [];
+
   // Create budget middleware separately so we can reset it per turn.
   // budgetMiddleware counters accumulate across calls — without reset() every
   // subsequent turn in the REPL would count toward the same cap.
@@ -338,6 +380,9 @@ export async function runCli(): Promise<void> {
       "You DO remember across sessions — never say you lack memory or that each session starts fresh.\n\n" +
       "For multi-step work, call update_plan to track steps and delegate_task to hand focused " +
       "sub-problems to a sub-agent.\n\n" +
+      "LINKS: When the user shares any URL (a skill.md, docs, an API or MCP endpoint, etc.), call " +
+      "fetch_url to read it — never say you can't open links" +
+      (webPlugins.length > 0 ? ". Use web_search to look things up on the web.\n\n" : ".\n\n") +
       "SUI: You can operate on the Sui blockchain directly with your own tools — do NOT tell the user " +
       "to install a browser wallet extension. " +
       (suiSignerRef
@@ -350,7 +395,7 @@ export async function runCli(): Promise<void> {
       "action), and sui_execute_ptb (sign a PTB an external builder/Rill produced). Prefer sui_transfer " +
       "for sends and sui_move_call for contract calls. Always confirm details and remind the user to " +
       "fund the wallet. Never claim you cannot transact on Sui — you can, via these tools.",
-    tools: [echoTool, suiSetupTool],
+    tools: [echoTool, suiSetupTool, fetchUrlTool],
     plugins: [
       {
         name: "observability",
@@ -361,6 +406,7 @@ export async function runCli(): Promise<void> {
       memoryPlugin,
       suiPlugin({ signer: () => suiSignerRef }), // always present; tools guide setup if no wallet
       ...suiPlugins, // Rill MCP builder tools (if connected)
+      ...webPlugins, // web_search when BRAVE_API_KEY is set
       ...skillPlugins,
     ],
   });

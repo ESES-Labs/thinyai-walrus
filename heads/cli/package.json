@@ -1,6 +1,6 @@
 {
   "name": "thinyai",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Thiny AI — a beautiful terminal agent: interactive chat, tools, Walrus memory, and Sui execution.",
   "type": "module",
   "license": "MIT",
@@ -49,6 +49,7 @@
     "@thiny/walrus": "workspace:*",
     "@thiny/plugin-agents": "workspace:*",
     "@thiny/plugin-sui": "workspace:*",
+    "@thiny/plugin-web-search": "workspace:*",
     "@thiny/signer-sui": "workspace:*",
     "@thiny/skills": "workspace:*",
     "tsup": "^8.5.1",
