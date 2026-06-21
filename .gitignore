@@ -45,3 +45,10 @@ thiny-walrus-integration-plan.md
 thiny-walrus-submission-plan.md
 thiny-sui-execution-plan.md
 thiny-cli-upgrade-mapping.md
+thiny-technical-design.md
+thiny-implementation-plan.md
+thiny-prd.md
+IMPLEMENTATION_PLAN.md
+
+# Generated API docs (built by `pnpm docs:build`, deployed by CI)
+docs/api/
