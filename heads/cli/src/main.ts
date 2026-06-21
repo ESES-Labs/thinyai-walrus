@@ -181,7 +181,9 @@ export async function runCli(): Promise<void> {
       })
     : walrusMemoryPlugin({
         client: walrus,
-        pointers: filePointerStore(process.env.WALRUS_POINTERS ?? "thiny-pointers.json"),
+        // Stable per-user location (~/.thiny) so cross-session memory works no matter which
+        // directory `thiny` is launched from — a cwd-relative file would fragment per folder.
+        pointers: filePointerStore(process.env.WALRUS_POINTERS ?? join(thinyDir, "thiny-pointers.json")),
         userId,
         onStoreStart: () => (pendingWrites += 1),
         onStore: (ref) => {
