@@ -62,7 +62,12 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         throw new Error("sui_balance: no address given and the signer has no key/address.");
       }
       const bal = await signer.client.getBalance({ owner, ...(coinType ? { coinType } : {}) });
-      return { owner, coinType: bal.coinType, totalBalanceMist: bal.totalBalance, coins: bal.coinObjectCount };
+      return {
+        owner,
+        coinType: bal.coinType,
+        totalBalanceMist: bal.totalBalance,
+        coins: bal.coinObjectCount,
+      };
     },
   });
 
@@ -90,24 +95,27 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
     description:
       "Sign and submit an unsigned Sui programmable transaction (PTB) that a builder/MCP produced. " +
       "Re-simulates the PTB, applies the soft policy and approval gate, then signs + submits. " +
-      "Pass the builder's `unsignedTx` (the serialized string from `Transaction.toJSON()`) — built " +
-      "with NO sender and NO gas (the signer fills both). On-chain caps may still abort it.",
+      "Pass the builder's `unsignedPtb` (base64 of the serialized transaction) — built with NO sender " +
+      "and NO gas (the signer fills both). On-chain caps may still abort it.",
     sensitive: true,
     parameters: z.object({
-      unsignedTx: z
+      unsignedPtb: z
         .string()
         .min(1)
-        .describe("The builder's unsigned PTB — a serialized `Transaction.toJSON()` string."),
+        .describe("The builder's unsigned PTB — base64 of a serialized Sui transaction."),
     }),
-    execute: async ({ unsignedTx }) => {
-      // 1. Deserialize the builder's PTB (serialized via Transaction.toJSON(); signer adds sender+gas).
-      const tx = Transaction.from(unsignedTx);
+    execute: async ({ unsignedPtb }) => {
+      // 1. Deserialize: Rill sends base64 of the serialized tx (`Buffer.from(tx.serialize()).toString("base64")`);
+      //    decode, then rebuild. The signer adds sender + gas at sign time.
+      const tx = Transaction.from(Buffer.from(unsignedPtb, "base64").toString("utf8"));
 
       // 2. Re-simulate (defense-in-depth — catch drift since the builder's sim; no gas, no signature).
       const sim = await signer.devInspect(tx);
       const status = sim.effects.status.status;
       if (requireSimSuccess && status !== "success") {
-        throw new Error(`sui_execute_ptb: simulation failed (${sim.effects.status.error ?? status})`);
+        throw new Error(
+          `sui_execute_ptb: simulation failed (${sim.effects.status.error ?? status})`,
+        );
       }
 
       // 3. Soft policy: estimated-gas ceiling (the hard budget cap is on-chain via agent_wallet).
@@ -125,7 +133,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
       if (opts.approver) {
         const ok = await opts.approver({
           tool: "sui_execute_ptb",
-          args: { unsignedTx },
+          args: { unsignedPtb },
           reason: "sign and submit a Sui PTB",
         });
         if (!ok) throw new Error("sui_execute_ptb: rejected by approver.");
