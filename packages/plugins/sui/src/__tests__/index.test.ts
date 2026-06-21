@@ -32,7 +32,7 @@ describe("suiPlugin", () => {
   it("sui_execute_ptb rejects an unparseable PTB", async () => {
     await expect(
       tool({ signer: keyless() }, "sui_execute_ptb").execute(
-        { ptbBase64: "@@@ not a ptb @@@" },
+        { unsignedTx: "@@@ not a ptb @@@" },
         {} as never,
       ),
     ).rejects.toThrow();
@@ -62,7 +62,7 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
     const ptb = await tx.toJSON(); // Transaction.from() accepts this (or base64 BCS from a builder)
     // Sim passes against live testnet, policy passes, no approver → fails only at the sign step.
     await expect(
-      tool({ signer: keyless() }, "sui_execute_ptb").execute({ ptbBase64: ptb }, {} as never),
+      tool({ signer: keyless() }, "sui_execute_ptb").execute({ unsignedTx: ptb }, {} as never),
     ).rejects.toThrow(/no key/);
   });
 
@@ -72,7 +72,7 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
     const ptb = await tx.toJSON();
     await expect(
       tool({ signer: keyless(), policy: { maxGasBudgetMist: 1n } }, "sui_execute_ptb").execute(
-        { ptbBase64: ptb },
+        { unsignedTx: ptb },
         {} as never,
       ),
     ).rejects.toThrow(/exceeds policy cap/);
@@ -84,9 +84,19 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
     const ptb = await tx.toJSON();
     await expect(
       tool({ signer: keyless(), approver: () => Promise.resolve(false) }, "sui_execute_ptb").execute(
-        { ptbBase64: ptb },
+        { unsignedTx: ptb },
         {} as never,
       ),
     ).rejects.toThrow(/rejected by approver/);
+  });
+
+  it("sui_execute_ptb blocks a PTB that fails simulation (requireSimSuccess)", async () => {
+    const tx = new Transaction();
+    // A call into a non-existent package → the dry-run does not predict success.
+    tx.moveCall({ target: `0x${"0".repeat(63)}9::nope::nope` });
+    const ptb = await tx.toJSON();
+    await expect(
+      tool({ signer: keyless() }, "sui_execute_ptb").execute({ unsignedTx: ptb }, {} as never),
+    ).rejects.toThrow();
   });
 });

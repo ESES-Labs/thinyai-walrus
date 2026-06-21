@@ -90,14 +90,18 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
     description:
       "Sign and submit an unsigned Sui programmable transaction (PTB) that a builder/MCP produced. " +
       "Re-simulates the PTB, applies the soft policy and approval gate, then signs + submits. " +
-      "Pass the base64 `unsignedPtb` returned by the builder. On-chain caps may still abort it.",
+      "Pass the builder's `unsignedTx` (the serialized string from `Transaction.toJSON()`) — built " +
+      "with NO sender and NO gas (the signer fills both). On-chain caps may still abort it.",
     sensitive: true,
     parameters: z.object({
-      ptbBase64: z.string().min(1).describe("Base64 of the unsigned PTB (the builder's `unsignedPtb`)."),
+      unsignedTx: z
+        .string()
+        .min(1)
+        .describe("The builder's unsigned PTB — a serialized `Transaction.toJSON()` string."),
     }),
-    execute: async ({ ptbBase64 }) => {
-      // 1. Deserialize the builder's PTB.
-      const tx = Transaction.from(ptbBase64);
+    execute: async ({ unsignedTx }) => {
+      // 1. Deserialize the builder's PTB (serialized via Transaction.toJSON(); signer adds sender+gas).
+      const tx = Transaction.from(unsignedTx);
 
       // 2. Re-simulate (defense-in-depth — catch drift since the builder's sim; no gas, no signature).
       const sim = await signer.devInspect(tx);
@@ -121,7 +125,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
       if (opts.approver) {
         const ok = await opts.approver({
           tool: "sui_execute_ptb",
-          args: { ptbBase64 },
+          args: { unsignedTx },
           reason: "sign and submit a Sui PTB",
         });
         if (!ok) throw new Error("sui_execute_ptb: rejected by approver.");

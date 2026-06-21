@@ -35,12 +35,16 @@ const agent = await createAgent({
 |------|-------|------|
 | `sui_balance` | `{ address?, coinType? }` | Read a coin balance (defaults to the agent's address + SUI). |
 | `sui_object` | `{ objectId }` | Read an object's type + fields. |
-| `sui_execute_ptb` | `{ ptbBase64 }` | **Gated executor:** deserialize → re-`devInspect` → soft policy → approval gate → sign → submit. |
+| `sui_execute_ptb` | `{ unsignedTx }` | **Gated executor:** deserialize → re-`devInspect` → soft policy → approval gate → sign → submit. |
 
 ## The gated path (`sui_execute_ptb`)
 
 The agent receives an **unsigned PTB** from a builder (e.g. Rill's hosted MCP, which returns
-`{ unsignedPtb, preview, simulation }`) and hands it here. The plugin:
+`{ unsignedTx, preview, simulation }`) and hands it here. The plugin:
+
+> **Wire contract:** the builder serializes the PTB with `Transaction.toJSON()` and sets **no sender
+> and no gas** — the signer fills both at sign time. `sui_execute_ptb` reconstructs it with
+> `Transaction.from(unsignedTx)`.
 
 1. Deserializes the PTB (`Transaction.from`).
 2. **Re-simulates** (`devInspect`) — aborts if it would fail (defense-in-depth; no gas, no signature).
