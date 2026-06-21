@@ -69,13 +69,25 @@ export {
   type MemoryHeadLike,
 } from "@thiny/walrus";
 
-// Sui — on-chain memory-head pointer (verifiable + portable)
+// Sui — signer (sign/devInspect, mainnet guard) + on-chain memory-head pointer
 export {
+  suiSigner,
   suiMemoryHead,
+  type SuiSigner,
+  type SuiSignerOptions,
+  type SuiExecuteResult,
+  type SuiNetwork,
   type SuiMemoryHead,
   type SuiMemoryHeadOptions,
   type MemoryHeadPointers,
 } from "@thiny/signer-sui";
+
+// Sui — gated PTB execution + read tools (grounded agent transactions)
+export {
+  suiPlugin,
+  type SuiPluginOptions,
+  type SuiExecPolicy,
+} from "@thiny/plugin-sui";
 
 // Multi-agent — sub-agent delegation + planning tools
 export {
@@ -114,4 +126,11 @@ export { scriptModel, runEval, type Scenario, type EvalResult } from "@thiny/eva
 export { Runtime, type Job, type Trigger, type RuntimeOptions } from "@thiny/runtime";
 
 // MCP client adapter
-export { mcpPlugin, jsonSchemaToZod, type McpPlugin, type McpStdioOptions } from "@thiny/mcp";
+export {
+  mcpPlugin,
+  mcpHttpPlugin,
+  jsonSchemaToZod,
+  type McpPlugin,
+  type McpStdioOptions,
+  type McpHttpOptions,
+} from "@thiny/mcp";

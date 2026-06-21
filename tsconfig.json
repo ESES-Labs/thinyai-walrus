@@ -14,6 +14,7 @@
     { "path": "packages/adapters/signer-sui" },
     { "path": "packages/plugins/evm" },
     { "path": "packages/plugins/solana" },
+    { "path": "packages/plugins/sui" },
     { "path": "packages/plugins/tokens" },
     { "path": "packages/plugins/market" },
     { "path": "packages/plugins/trading-policy" },

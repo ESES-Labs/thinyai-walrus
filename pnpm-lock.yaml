@@ -480,6 +480,9 @@ importers:
       '@thiny/plugin-solana':
         specifier: workspace:*
         version: link:../plugins/solana
+      '@thiny/plugin-sui':
+        specifier: workspace:*
+        version: link:../plugins/sui
       '@thiny/plugin-web-search':
         specifier: workspace:*
         version: link:../plugins/web-search
@@ -583,6 +586,21 @@ importers:
       '@thiny/core':
         specifier: workspace:*
         version: link:../../core
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/plugins/sui:
+    dependencies:
+      '@mysten/sui':
+        specifier: ^2.19.0
+        version: 2.19.0(typescript@5.9.3)
+      '@thiny/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@thiny/signer-sui':
+        specifier: workspace:*
+        version: link:../../adapters/signer-sui
       zod:
         specifier: ^3.23.8
         version: 3.25.76

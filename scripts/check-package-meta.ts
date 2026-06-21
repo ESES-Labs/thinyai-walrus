@@ -58,6 +58,7 @@ const PUBLISHABLE_DIRS = [
   "packages/plugins/agents",
   "packages/plugins/evm",
   "packages/plugins/solana",
+  "packages/plugins/sui",
   "packages/plugins/web-search",
   "packages/plugins/tokens",
   "packages/plugins/market",
