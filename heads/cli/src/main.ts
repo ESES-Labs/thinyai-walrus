@@ -7,6 +7,7 @@
  *   THINY_PERSONA_NAME=ThinyAI pnpm cli
  */
 import { createInterface } from "node:readline/promises";
+import { clearLine, cursorTo } from "node:readline";
 import { stdin, stdout } from "node:process";
 import { z } from "zod";
 import {
@@ -48,6 +49,7 @@ import {
   renderWarning,
   renderStatus,
   renderStored,
+  renderSaving,
   createThinkingWriter,
   formatTokens,
   Spinner,
@@ -160,8 +162,12 @@ async function main(): Promise<void> {
   // Durable facts live on Walrus and are auto-injected each turn. MemWal (semantic) when provisioned.
   const userId = process.env.THINY_USER_ID ?? "default";
   const memwalEnabled = !!process.env.MEMWAL_DELEGATE_KEY && !!process.env.MEMWAL_ACCOUNT_ID;
-  // Walrus blobs that memory landed in this turn; drained + rendered after the run completes.
+  // Walrus memory writes are backgrounded (non-blocking). Track in-flight writes so we can show a
+  // "saving…" hint, and deliver the verifiable link whenever the write lands — even after the turn,
+  // above the prompt the user is already typing at. `deliverRef` is upgraded once `rl` exists.
   const memoryRefs: WalrusBlobRef[] = [];
+  let pendingWrites = 0;
+  let deliverRef: (ref: WalrusBlobRef) => void = (ref) => memoryRefs.push(ref);
   const memoryPlugin: Plugin = memwalEnabled
     ? memwalFactsPlugin({
         delegateKey: process.env.MEMWAL_DELEGATE_KEY,
@@ -173,7 +179,11 @@ async function main(): Promise<void> {
         client: walrus,
         pointers: filePointerStore(process.env.WALRUS_POINTERS ?? "thiny-pointers.json"),
         userId,
-        onStore: (ref) => memoryRefs.push(ref),
+        onStoreStart: () => (pendingWrites += 1),
+        onStore: (ref) => {
+          if (pendingWrites > 0) pendingWrites -= 1;
+          deliverRef(ref);
+        },
       });
 
   // Skills: merge thiny.config.json "skills" array with CLI --skills flag.
@@ -277,9 +287,36 @@ async function main(): Promise<void> {
   // out of the loop) so the last fact reliably lands on Walrus.
   const flushMemory = (memoryPlugin as { flush?: () => Promise<void> }).flush;
 
+  const PROMPT = "\x1b[36mYou\x1b[0m \x1b[2m›\x1b[0m ";
+  let atPrompt = false;
+  // Render `fn`'s output without clobbering the user's in-progress input: clear the prompt line,
+  // print, then let readline redraw the prompt + whatever they've typed (preserveCursor=true).
+  const printAbovePrompt = (fn: () => void): void => {
+    if (atPrompt) {
+      cursorTo(stdout, 0);
+      clearLine(stdout, 0);
+    }
+    fn();
+    if (atPrompt) rl.prompt(true);
+  };
+  // A completed write lands here: above the prompt if the user already moved on, else queued for the
+  // post-turn render.
+  deliverRef = (ref) => {
+    if (atPrompt) {
+      printAbovePrompt(() => {
+        renderStored("memory", explorerLinks(ref, network));
+      });
+    } else memoryRefs.push(ref);
+  };
+
   try {
   for (;;) {
-    const input = await rl.question("\x1b[36mYou\x1b[0m \x1b[2m›\x1b[0m ");
+    // Any write that finished in the gap since the last render → show its link before prompting.
+    for (const ref of memoryRefs.splice(0)) renderStored("memory", explorerLinks(ref, network));
+    if (pendingWrites > 0) renderSaving("memory"); // a write from the last turn is still uploading
+    atPrompt = true;
+    const input = await rl.question(PROMPT);
+    atPrompt = false;
     const trimmed = input.trim();
     if (!trimmed) continue;
 
@@ -418,9 +455,9 @@ async function main(): Promise<void> {
         turn.toolCalls > 0 ? `${String(turn.toolCalls)} tool${turn.toolCalls === 1 ? "" : "s"}` : "",
       ]);
 
-      // Memory landed on Walrus this turn → show its verifiable blob(s).
-      for (const ref of memoryRefs) renderStored("memory", explorerLinks(ref, network));
-      memoryRefs.length = 0;
+      // Memory that already finished uploading this turn → show its verifiable blob(s) now.
+      // Writes still in flight surface later (above the prompt) via deliverRef.
+      for (const ref of memoryRefs.splice(0)) renderStored("memory", explorerLinks(ref, network));
 
       // Store this turn's action log on Walrus and print its tamper-evident link.
       if (walrusAudit) {

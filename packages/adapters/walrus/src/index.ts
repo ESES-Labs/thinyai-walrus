@@ -432,6 +432,8 @@ export interface WalrusMemoryPluginOptions {
   maxFacts?: number;
   /** Called after a write with the verifiable blob ref — wire to the CLI to print links. */
   onStore?: (ref: WalrusBlobRef) => void;
+  /** Called when a background write starts — wire to the CLI to show a "saving…" indicator. */
+  onStoreStart?: () => void;
 }
 
 function emptyFacts(userId: string): WalrusFacts {
@@ -485,6 +487,7 @@ export function walrusMemoryPlugin(
   // prior facts still persist; upgrade to an awaited flush-on-exit if last-write durability matters.
   function save(facts: WalrusFacts): void {
     cache = facts;
+    opts.onStoreStart?.();
     pending = pending.then(async () => {
       try {
         const ref = await opts.client.putBlob(JSON.stringify(facts));

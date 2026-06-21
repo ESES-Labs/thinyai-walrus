@@ -266,6 +266,11 @@ export function renderStored(label: string, links: StoredLinks): void {
   if (links.object) process.stdout.write(DIM(`     obj · ${links.object}`) + "\n");
 }
 
+/** A dim "saving…" hint shown while a background Walrus write is still in flight. */
+export function renderSaving(label: string): void {
+  process.stdout.write(DIM(`  ⟳ saving ${label} to Walrus…`) + "\n");
+}
+
 // Streaming writer that dims `<think>…</think>` reasoning (handles tags split across chunks)
 
 const THINK_OPEN = "<think>";
