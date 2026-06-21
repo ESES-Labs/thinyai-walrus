@@ -36,6 +36,9 @@ import {
   type WalrusNetwork,
 } from "@thiny/walrus";
 import { agentsPlugin } from "@thiny/plugin-agents";
+import { suiSigner, type SuiNetwork } from "@thiny/signer-sui";
+import { suiPlugin } from "@thiny/plugin-sui";
+import { mcpHttpPlugin } from "@thiny/mcp";
 import type { Logger, Plugin } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
 import { loadSkills } from "./skills.js";
@@ -207,6 +210,30 @@ export async function runCli(): Promise<void> {
     ? { name: process.env.THINY_PERSONA_NAME, description: process.env.THINY_PERSONA_DESCRIPTION }
     : undefined;
 
+  // Sui execution: wired in when a key is configured (via `thiny sui init` or SUI_SECRET_KEY).
+  // Gives the agent sui_balance / sui_object / sui_execute_ptb; mcpHttpPlugin adds Rill's tools
+  // (which build the unsigned PTBs the agent then signs) when a Rill MCP URL is set.
+  const suiKey = process.env.SUI_SECRET_KEY ?? process.env.THINY_SUI_SECRET_KEY;
+  const suiNetwork: SuiNetwork = process.env.SUI_NETWORK === "mainnet" ? "mainnet" : "testnet";
+  const suiPlugins: Plugin[] = [];
+  let suiAddress: string | undefined;
+  if (suiKey) {
+    const signer = suiSigner({
+      network: suiNetwork,
+      secretKey: suiKey,
+      allowMainnet: process.env.SUI_ALLOW_MAINNET === "1",
+    });
+    suiAddress = signer.address;
+    suiPlugins.push(suiPlugin({ signer }));
+    if (process.env.MCP_URL) {
+      try {
+        suiPlugins.push(await mcpHttpPlugin({ url: process.env.MCP_URL, name: "rill" }));
+      } catch (err: unknown) {
+        renderWarning(`Rill MCP unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
   // Create budget middleware separately so we can reset it per turn.
   // budgetMiddleware counters accumulate across calls — without reset() every
   // subsequent turn in the REPL would count toward the same cap.
@@ -225,7 +252,14 @@ export async function runCli(): Promise<void> {
       "If asked what you remember, answer from the injected user memory (or call recall_memory). " +
       "You DO remember across sessions — never say you lack memory or that each session starts fresh.\n\n" +
       "For multi-step work, call update_plan to track steps and delegate_task to hand focused " +
-      "sub-problems to a sub-agent.",
+      "sub-problems to a sub-agent." +
+      (suiKey
+        ? `\n\nSUI: You have a Sui wallet on ${suiNetwork} at ${suiAddress ?? "(unknown)"}. ` +
+          "Use sui_balance to read balances and sui_object to inspect objects. To send a transaction " +
+          "you need an UNSIGNED PTB (e.g. built by a connected MCP/Rill tool); pass it to " +
+          "sui_execute_ptb, which simulates, applies caps, and signs it. Never claim you cannot " +
+          "transact on Sui — you can, via these tools."
+        : ""),
     tools: [echoTool],
     plugins: [
       {
@@ -235,6 +269,7 @@ export async function runCli(): Promise<void> {
       },
       agentsPlugin(),
       memoryPlugin,
+      ...suiPlugins,
       ...skillPlugins,
     ],
   });
@@ -284,6 +319,11 @@ export async function runCli(): Promise<void> {
   );
   if (walrusAudit)
     renderInfo(`Walrus audit: ON (${network}) — each turn's action log is stored + verifiable`);
+  if (suiKey)
+    renderInfo(
+      `Sui: ${suiNetwork} · ${suiAddress ?? "?"}${process.env.MCP_URL ? " · Rill MCP connected" : ""}`,
+    );
+  else renderInfo("Sui: not configured — run `thiny sui init` to add on-chain capabilities");
 
   // REPL
   const rl = createInterface({ input: stdin, output: stdout });
