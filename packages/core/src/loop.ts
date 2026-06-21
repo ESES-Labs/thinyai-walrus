@@ -69,6 +69,12 @@ export async function runLoop(
   const messages: Message[] = [...(opts.seed ?? []), { role: "user", content: input }];
   ctx.events.emit("onStart", { sessionId: ctx.sessionId });
 
+  // Loop guard: if the model requests the SAME tool call(s) this many times in a row, it's stuck
+  // (common with weaker models) — bail gracefully instead of spinning to maxSteps.
+  const MAX_REPEAT = 3;
+  let lastSignature = "";
+  let repeats = 0;
+
   for (let step = 0; step < ctx.maxSteps; step++) {
     // ①
     ctx.events.emit("beforeModelCall", { step, messages });
@@ -92,6 +98,22 @@ export async function runLoop(
       const text = response.text ?? "";
       ctx.events.emit("onFinish", { step, text });
       return { text, messages };
+    }
+
+    // Repeat guard: detect the model asking for the identical tool call(s) over and over.
+    const signature = response.toolCalls
+      .map((c) => `${c.name}:${JSON.stringify(c.args)}`)
+      .join("|");
+    repeats = signature === lastSignature ? repeats + 1 : 1;
+    lastSignature = signature;
+    if (repeats >= MAX_REPEAT) {
+      const text =
+        response.text ??
+        ""; // model is stuck repeating itself — stop with whatever it last said (or a note)
+      const out =
+        text || "(stopped: the model kept repeating the same action without making progress)";
+      ctx.events.emit("onFinish", { step, text: out });
+      return { text: out, messages };
     }
 
     // ④ ACT — execute every requested tool, serializing those with conflicting resource locks

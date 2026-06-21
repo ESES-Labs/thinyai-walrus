@@ -141,7 +141,7 @@ describe("runLoop", () => {
     expect(result.text).toMatch(/ERROR: kaboom/);
   });
 
-  it("throws MaxStepsError when the model loops forever", async () => {
+  it("throws MaxStepsError when the model loops forever (with varying calls)", async () => {
     const tools = new ToolRegistry();
     tools.register(
       defineTool({
@@ -151,11 +151,14 @@ describe("runLoop", () => {
         execute: () => Promise.resolve("x"),
       }),
     );
+    // Varying args each step → bypasses the identical-call repeat guard, so the absolute maxSteps
+    // cap is what stops it.
+    let n = 0;
     const model: ModelProvider = {
       generate: (): Promise<ModelResponse> =>
         Promise.resolve({
           finishReason: "tool_calls",
-          toolCalls: [{ id: "c", name: "noop", args: {} }],
+          toolCalls: [{ id: "c", name: "noop", args: { n: n++ } }],
         }),
     };
     await expect(runLoop("loop", makeCtx(model, tools))).rejects.toThrow(/exceeded the maximum/);
@@ -359,5 +362,29 @@ describe("runLoop", () => {
     await runLoop("run edge case tools", makeCtx(model, tools));
     expect(runOrder).toContain("start:dupe");
     expect(runOrder).toContain("start:empty");
+  });
+
+  it("bails gracefully when the model repeats the identical tool call (stuck)", async () => {
+    const tools = new ToolRegistry();
+    let calls = 0;
+    tools.register(
+      defineTool({
+        name: "spin",
+        description: "spin",
+        parameters: z.object({}),
+        execute: () => {
+          calls++;
+          return Promise.resolve("again");
+        },
+      }),
+    );
+    // A model that ALWAYS asks for the same tool call — never produces a final answer.
+    const model: ModelProvider = {
+      generate: (): Promise<ModelResponse> =>
+        Promise.resolve({ finishReason: "tool_calls", toolCalls: [{ id: "c", name: "spin", args: {} }] }),
+    };
+    const result = await runLoop("go", makeCtx(model, tools)); // must NOT throw MaxStepsError
+    expect(result.text).toMatch(/repeating|progress|stuck/i);
+    expect(calls).toBeLessThan(5); // stopped well before maxSteps (5)
   });
 });
