@@ -5,7 +5,7 @@ node_modules/
 dist/
 lib/
 build/
-.tsbuildinfo
+*.tsbuildinfo
 
 # Coverage
 coverage/
@@ -36,3 +36,12 @@ pnpm-debug.log*
 .husky/_/
 
 .superpowers
+
+# Walrus pointer state (runtime artifact)
+thiny-pointers.json
+
+# Local planning / design docs (kept out of the repo)
+thiny-walrus-integration-plan.md
+thiny-walrus-submission-plan.md
+thiny-sui-execution-plan.md
+thiny-cli-upgrade-mapping.md
