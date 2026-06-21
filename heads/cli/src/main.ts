@@ -41,7 +41,6 @@ import {
   renderHeader,
   renderToolsAndSkills,
   renderHints,
-  renderUserMessage,
   renderAgentLabel,
   renderAgentDone,
   renderError,
@@ -402,7 +401,6 @@ async function main(): Promise<void> {
       continue;
     }
 
-    renderUserMessage(trimmed);
     renderAgentLabel(personaName);
     spinner.start("thinking…");
 

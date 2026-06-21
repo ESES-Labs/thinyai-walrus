@@ -9,11 +9,9 @@ import chalk from "chalk";
 
 const BRAND = chalk.cyan;
 const DIM = chalk.dim;
-const USER_LABEL = chalk.bold.white;
 const AGENT_LABEL = BRAND.bold;
 const ERROR_COLOR = chalk.red;
 const SUCCESS_COLOR = chalk.green;
-const SEPARATOR = DIM("─".repeat(getWidth()));
 
 // Helpers
 
@@ -169,15 +167,9 @@ export function renderHints(logFile?: string): void {
 
 // Message formatting
 
-export function renderUserMessage(text: string): void {
-  process.stdout.write("\n" + USER_LABEL("You") + "\n");
-  process.stdout.write(SEPARATOR + "\n");
-  process.stdout.write(chalk.white(text) + "\n");
-}
-
 export function renderAgentLabel(name: string): void {
+  // The user's turn is the `You › …` prompt echo itself — no need to re-render it as a block.
   process.stdout.write("\n" + AGENT_LABEL(name) + "\n");
-  process.stdout.write(SEPARATOR + "\n");
 }
 
 export function renderAgentDone(): void {
@@ -260,10 +252,10 @@ export interface StoredLinks {
 }
 
 export function renderStored(label: string, links: StoredLinks, backend = "Walrus"): void {
-  process.stdout.write(SUCCESS_COLOR("  ✓ ") + DIM(`${label} on ${backend}`) + "\n");
-  process.stdout.write(DIM(`     ${links.blob}`) + "\n");
-  if (links.tx) process.stdout.write(DIM(`     tx · ${links.tx}`) + "\n");
-  if (links.object) process.stdout.write(DIM(`     obj · ${links.object}`) + "\n");
+  // One compact, verifiable line — the walruscan blob link is enough to inspect/verify the write.
+  process.stdout.write(
+    SUCCESS_COLOR("  ✓ ") + DIM(`${label} on ${backend}  ·  `) + chalk.dim.underline(links.blob) + "\n",
+  );
 }
 
 /** A dim "saving…" hint shown while a background write is still in flight. */
