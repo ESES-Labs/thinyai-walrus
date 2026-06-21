@@ -505,9 +505,20 @@ export async function runCli(): Promise<void> {
       const net = network ?? suiNetwork;
       const client =
         net === suiNetwork && suiSignerRef ? suiSignerRef.client : suiSigner({ network: net }).client;
-      const addrs = address ? [address] : suiWalletsOf(loadConfig()).map((w) => w.address);
+      const walletAddrs = suiWalletsOf(loadConfig()).map((w) => w.address);
+      // Include the active signer's address even if it came from an env key (not the config list).
+      if (suiSignerRef?.address && !walletAddrs.includes(suiSignerRef.address)) {
+        walletAddrs.push(suiSignerRef.address);
+      }
+      const addrs = address ? [address] : walletAddrs;
       if (addrs.length === 0) {
-        throw new Error("No Sui wallets configured. Ask the user to set one up (sui_setup).");
+        return {
+          ok: false,
+          setupNeeded: true,
+          message:
+            "Sui isn't set up. Ask the user which network and wallet (generate / import / Rill), " +
+            "then call sui_setup. Don't retry until then.",
+        };
       }
       const addresses = [];
       for (const addr of addrs) {

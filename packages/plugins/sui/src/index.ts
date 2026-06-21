@@ -51,27 +51,27 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
   const sig = opts.signer;
   const resolve: () => SuiSigner | null | undefined =
     typeof sig === "function" ? sig : () => sig;
-  /** Get the active signer, or throw a clear, agent-actionable message if none is set up yet. */
-  const signerOrThrow = (): SuiSigner => {
-    const s = resolve();
-    if (!s) {
-      throw new Error(
-        "No Sui wallet configured yet. Call sui_setup to create or import one (or tell the user to run `thiny sui init`).",
-      );
-    }
-    return s;
-  };
+  // When no wallet is configured, tools RETURN this (they do NOT throw) — a thrown error makes weak
+  // models retry in a loop; a clean terminal result gets relayed to the user immediately.
+  const SETUP_NEEDED = {
+    ok: false,
+    setupNeeded: true,
+    message:
+      "Sui isn't set up yet. Ask the user which network (testnet or mainnet) and which wallet " +
+      "(generate a new key, import a private key, or use a Rill agent wallet), then call sui_setup. " +
+      "Do NOT retry this tool until setup is complete.",
+  } as const;
   const requireSimSuccess = opts.policy?.requireSimSuccess ?? true;
 
   // Shared gated path for every transaction the plugin signs (built here or received as a PTB):
   // re-simulate → soft policy → approval gate → sign + submit.
   const executeTx = async (
+    signer: SuiSigner,
     tx: Transaction,
     toolName: string,
     approvalArgs: Record<string, unknown>,
     reason: string,
   ): Promise<{ digest: string; effects: unknown; explorerUrl: string }> => {
-    const signer = signerOrThrow();
     const sim = await signer.devInspect(tx);
     const status = sim.effects.status.status;
     if (requireSimSuccess && status !== "success") {
@@ -104,10 +104,11 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
       coinType: z.string().optional().describe("Coin type, e.g. 0x2::sui::SUI (default: SUI)."),
     }),
     execute: async ({ address, coinType }) => {
-      const signer = signerOrThrow();
+      const signer = resolve();
+      if (!signer) return SETUP_NEEDED;
       const owner = address ?? signer.address;
       if (owner === undefined) {
-        throw new Error("sui_balance: no address given and the signer has no key/address.");
+        return { ok: false, message: "No address given and no wallet is set up. Run sui_setup first." };
       }
       const bal = await signer.client.getBalance({ owner, ...(coinType ? { coinType } : {}) });
       return {
@@ -124,7 +125,8 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
     description: "Read a Sui object's type and fields by id.",
     parameters: z.object({ objectId: z.string().min(1).describe("The object id (0x…).") }),
     execute: async ({ objectId }) => {
-      const signer = signerOrThrow();
+      const signer = resolve();
+      if (!signer) return SETUP_NEEDED;
       const res = await signer.client.getObject({
         id: objectId,
         options: { showContent: true, showType: true, showOwner: true },
@@ -155,9 +157,11 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         .describe("Unsigned PTB — the JSON string from Transaction.toJSON() (no sender, no gas)."),
     }),
     execute: async ({ unsignedTx }) => {
+      const signer = resolve();
+      if (!signer) return SETUP_NEEDED;
       // The wire contract is the toJSON() string; the signer adds sender + gas at sign time.
       const tx = Transaction.from(unsignedTx);
-      return await executeTx(tx, "sui_execute_ptb", { unsignedTx }, "sign and submit a Sui PTB");
+      return await executeTx(signer, tx, "sui_execute_ptb", { unsignedTx }, "sign and submit a Sui PTB");
     },
   });
 
@@ -173,7 +177,8 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
       coinType: z.string().optional().describe("Coin type (default 0x2::sui::SUI)."),
     }),
     execute: async ({ recipient, amountMist, coinType }) => {
-      const signer = signerOrThrow();
+      const signer = resolve();
+      if (!signer) return SETUP_NEEDED;
       const amount = BigInt(amountMist);
       const type = coinType ?? "0x2::sui::SUI";
       const tx = new Transaction();
@@ -184,7 +189,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
       } else {
         // Other coins: gather the sender's coins of this type, merge, split the exact amount.
         const owner = signer.address;
-        if (owner === undefined) throw new Error("sui_transfer: signer has no address.");
+        if (owner === undefined) return { ok: false, message: "Wallet has no address. Run sui_setup." };
         const { data } = await signer.client.getCoins({ owner, coinType: type });
         const [first, ...rest] = data;
         if (!first) throw new Error(`sui_transfer: no ${type} coins owned by ${owner}.`);
@@ -196,6 +201,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         tx.transferObjects([coin], tx.pure.address(recipient));
       }
       return executeTx(
+        signer,
         tx,
         "sui_transfer",
         { recipient, amountMist, coinType: type },
@@ -235,6 +241,8 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         .describe("Ordered arguments to the function."),
     }),
     execute: async ({ target, typeArguments, args }) => {
+      const signer = resolve();
+      if (!signer) return SETUP_NEEDED;
       const tx = new Transaction();
       const built = (args ?? []).map((a) => {
         if (a.kind === "gas") return tx.gas;
@@ -257,7 +265,7 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         }
       });
       tx.moveCall({ target, typeArguments: typeArguments ?? [], arguments: built });
-      return await executeTx(tx, "sui_move_call", { target, typeArguments, args }, `Move call ${target}`);
+      return await executeTx(signer, tx, "sui_move_call", { target, typeArguments, args }, `Move call ${target}`);
     },
   });
 

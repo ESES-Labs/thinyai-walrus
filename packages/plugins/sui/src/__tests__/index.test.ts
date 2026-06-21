@@ -29,16 +29,23 @@ describe("suiPlugin", () => {
     ]);
   });
 
-  it("a lazy signer getter that returns null tells the agent to run sui_setup", async () => {
-    await expect(
-      tool({ signer: () => null }, "sui_balance").execute({}, {} as never),
-    ).rejects.toThrow(/sui_setup/);
+  it("returns a setup-needed result (not a throw) when no wallet is configured", async () => {
+    // A clean terminal result — a thrown error makes weak models retry in a loop.
+    const out = (await tool({ signer: () => null }, "sui_balance").execute({}, {} as never)) as {
+      setupNeeded?: boolean;
+      message?: string;
+    };
+    expect(out.setupNeeded).toBe(true);
+    expect(out.message).toMatch(/sui_setup/);
   });
 
-  it("sui_balance errors when there is no address and no key", async () => {
-    await expect(
-      tool({ signer: keyless() }, "sui_balance").execute({}, {} as never),
-    ).rejects.toThrow(/no address/);
+  it("returns a clear result (not a throw) when there's no address", async () => {
+    const out = (await tool({ signer: keyless() }, "sui_balance").execute({}, {} as never)) as {
+      ok?: boolean;
+      message?: string;
+    };
+    expect(out.ok).toBe(false);
+    expect(out.message).toMatch(/sui_setup/);
   });
 
   it("sui_execute_ptb rejects an unparseable PTB", async () => {
