@@ -264,6 +264,8 @@ export async function runCli(): Promise<void> {
         // directory `thiny` is launched from — a cwd-relative file would fragment per folder.
         pointers: filePointerStore(process.env.WALRUS_POINTERS ?? join(thinyDir, "thiny-pointers.json")),
         userId,
+        // Instant, reliable local mirror — cross-session memory no longer waits on the slow Walrus PUT.
+        cacheFile: join(thinyDir, `memory-${userId}.json`),
         onStoreStart: () => (pendingWrites += 1),
         onStore: (ref) => {
           if (pendingWrites > 0) pendingWrites -= 1;
@@ -593,10 +595,12 @@ export async function runCli(): Promise<void> {
       "read-only actions, and never say you can't do something one of your tools covers. Chain tools " +
       "when needed (e.g. web_search → fetch_url → act).\n\n" +
       "YOUR TOOLS:\n" +
-      "• Memory — remember_fact, recall_memory: durable memory across sessions (stored on Walrus). " +
-      "Known facts are injected each turn under “[User Memory …]”. Immediately save anything durable " +
-      "the user shares (name, role, preferences, projects, goals). Answer “what do you remember” from " +
-      "it. You DO remember across sessions — never say otherwise.\n" +
+      "• Memory — remember_fact: durable memory across sessions. Whenever the user shares anything " +
+      "durable about themselves (name, role, preferences, projects, goals), call remember_fact ONCE to " +
+      "save it. Your known facts are AUTO-INJECTED at the top of every conversation under " +
+      "“[User Memory …]”, so answer “what do you remember / what's my name” directly from that context " +
+      "— do NOT call recall_memory unless the injected memory is empty and you truly need to re-check. " +
+      "You DO remember across sessions; never say otherwise.\n" +
       "• Links — fetch_url: read ANY URL the user shares (a skill.md, docs, JSON, an API/MCP endpoint). " +
       "Always fetch shared links instead of saying you can't open URLs.\n" +
       (webSearchOn

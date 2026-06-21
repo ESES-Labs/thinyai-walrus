@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { defineTool } from "@thiny/core";
@@ -430,6 +431,12 @@ export interface WalrusMemoryPluginOptions {
   userId: string;
   /** Cap on stored facts/preferences (oldest dropped). Default 50. */
   maxFacts?: number;
+  /**
+   * Local JSON file mirroring the facts. Written synchronously on every change so memory is durable
+   * and instantly available across sessions even if the Walrus PUT is slow or the process is killed.
+   * Walrus remains the verifiable/portable copy. Strongly recommended for interactive use.
+   */
+  cacheFile?: string;
   /** Called after a write with the verifiable blob ref — wire to the CLI to print links. */
   onStore?: (ref: WalrusBlobRef) => void;
   /** Called when a background write starts — wire to the CLI to show a "saving…" indicator. */
@@ -464,6 +471,15 @@ export function walrusMemoryPlugin(
 
   async function load(): Promise<WalrusFacts> {
     if (cache) return cache;
+    // Local cache first — instant + reliable, independent of Walrus speed/uptime.
+    if (opts.cacheFile && existsSync(opts.cacheFile)) {
+      try {
+        cache = JSON.parse(readFileSync(opts.cacheFile, "utf8")) as WalrusFacts;
+        return cache;
+      } catch {
+        /* corrupt local cache → fall through to Walrus */
+      }
+    }
     loading ??= (async () => {
       try {
         const blobId = await opts.pointers.get(key);
@@ -487,6 +503,16 @@ export function walrusMemoryPlugin(
   // prior facts still persist; upgrade to an awaited flush-on-exit if last-write durability matters.
   function save(facts: WalrusFacts): void {
     cache = facts;
+    // Persist locally NOW (synchronous) so the fact survives even an immediate exit / Ctrl-C and is
+    // available next session regardless of how slow the Walrus PUT is.
+    if (opts.cacheFile) {
+      try {
+        mkdirSync(dirname(opts.cacheFile), { recursive: true });
+        writeFileSync(opts.cacheFile, JSON.stringify(facts, null, 2));
+      } catch {
+        /* local cache best-effort */
+      }
+    }
     opts.onStoreStart?.();
     pending = pending.then(async () => {
       try {

@@ -1,4 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { existsSync, rmSync } from "node:fs";
 import type { Logger } from "@thiny/core";
 import type { Message } from "@thiny/core";
 import {
@@ -279,5 +282,33 @@ describe("walrusMemoryPlugin (cross-session memory, default)", () => {
     const p = walrusMemoryPlugin({ client: badClient, pointers, userId: "u1" });
     const facts = (await toolNamed(p, "recall_memory").execute({}, {} as never)) as WalrusFacts;
     expect(facts.facts).toEqual([]);
+  });
+
+  it("cacheFile: a fact persists locally + instantly and a fresh session recalls it", async () => {
+    const file = join(tmpdir(), `thiny-mem-test-${String(Date.now())}-${String(Math.random()).slice(2)}.json`);
+    try {
+      // A Walrus client that never resolves PUT — proves persistence does NOT depend on Walrus.
+      const stuck: WalrusClient = { ...fakeWalrus(), putBlob: () => new Promise(() => undefined) };
+      const a = walrusMemoryPlugin({
+        client: stuck,
+        pointers: inMemoryPointerStore(),
+        userId: "u",
+        cacheFile: file,
+      });
+      await toolNamed(a, "remember_fact").execute({ fact: "name is Andre", kind: "fact" }, {} as never);
+      expect(existsSync(file)).toBe(true); // written synchronously, no flush/await needed
+
+      // Fresh instance (new session) — recalls from the local cache, no Walrus.
+      const b = walrusMemoryPlugin({
+        client: stuck,
+        pointers: inMemoryPointerStore(),
+        userId: "u",
+        cacheFile: file,
+      });
+      const facts = (await toolNamed(b, "recall_memory").execute({}, {} as never)) as WalrusFacts;
+      expect(facts.facts).toContain("name is Andre");
+    } finally {
+      if (existsSync(file)) rmSync(file);
+    }
   });
 });
