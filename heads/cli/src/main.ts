@@ -6,8 +6,7 @@
  *   pnpm cli --skills web-search,evm
  *   THINY_PERSONA_NAME=ThinyAI pnpm cli
  */
-import { createInterface } from "node:readline/promises";
-import { clearLine, cursorTo, emitKeypressEvents } from "node:readline";
+import { SlashPrompt, type SlashCommand } from "./prompt.js";
 import { stdin, stdout } from "node:process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -140,6 +139,19 @@ function parseSkillArgs(): string[] {
 }
 
 let currentSessionId = `cli-${new Date().getTime().toString()}`;
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  { name: "/new", desc: "Start a new session (long-term memory carries over)" },
+  { name: "/connect", desc: "Switch the LLM provider" },
+  { name: "/models", desc: "Change the active provider's model" },
+  { name: "/tools", desc: "List available tools" },
+  { name: "/skills", desc: "List available skills" },
+  { name: "/session", desc: "Show the current session id" },
+  { name: "/stats", desc: "Session token + tool stats" },
+  { name: "/verify", desc: "Replay a Walrus audit trail by blob id" },
+  { name: "/clear", desc: "Clear the screen" },
+  { name: "/help", desc: "Show help" },
+];
 
 /** True if `latest` is a higher semver than `current` (numeric major.minor.patch). */
 function isNewerVersion(latest: string, current: string): boolean {
@@ -676,32 +688,18 @@ export async function runCli(): Promise<void> {
   );
   notifyIfUpdate(thinyDir);
 
-  // REPL
-  const rl = createInterface({ input: stdin, output: stdout });
-  emitKeypressEvents(stdin); // so we can detect Esc to cancel an in-flight turn
+  // REPL — a raw-mode prompt with a live slash-command palette (type "/").
+  const PROMPT = "\x1b[36mYou\x1b[0m \x1b[2m›\x1b[0m ";
+  const prompt = new SlashPrompt(stdin, stdout, PROMPT, SLASH_COMMANDS);
   const spinner = new Spinner();
 
-  // Memory writes are backgrounded for speed; flush any in-flight write on exit (EOF/Ctrl-D throws
-  // out of the loop) so the last fact reliably lands on Walrus.
+  // Memory writes are backgrounded for speed; flush any in-flight write on exit so the last fact lands.
   const flushMemory = (memoryPlugin as { flush?: () => Promise<void> }).flush;
 
-  const PROMPT = "\x1b[36mYou\x1b[0m \x1b[2m›\x1b[0m ";
-  let atPrompt = false;
-  // Render `fn`'s output without clobbering the user's in-progress input: clear the prompt line,
-  // print, then let readline redraw the prompt + whatever they've typed (preserveCursor=true).
-  const printAbovePrompt = (fn: () => void): void => {
-    if (atPrompt) {
-      cursorTo(stdout, 0);
-      clearLine(stdout, 0);
-    }
-    fn();
-    if (atPrompt) rl.prompt(true);
-  };
-  // A completed write lands here: above the prompt if the user already moved on, else queued for the
-  // post-turn render.
+  // A completed write lands here: printed above the live prompt if the user is at it, else queued.
   deliverRef = (ref) => {
-    if (atPrompt) {
-      printAbovePrompt(() => {
+    if (prompt.isReading()) {
+      prompt.printAbove(() => {
         renderStored("memory saved", explorerLinks(ref, network), memBackend);
       });
     } else memoryRefs.push(ref);
@@ -723,7 +721,7 @@ export async function runCli(): Promise<void> {
           `  ${String(i + 1)}. ${pr.label}  (${pr.model})${pr.id === cfg.activeProviderId ? "  · active" : ""}`,
         );
       });
-      const ans = (await rl.question("Switch to (number, blank to cancel): ")).trim();
+      const ans = ((await prompt.readLine("Switch to (number, blank to cancel): ")) ?? "").trim();
       if (!ans) return;
       const idx = Number(ans) - 1;
       const chosen = provs[idx];
@@ -760,7 +758,7 @@ export async function runCli(): Promise<void> {
       providersOf(cfg).forEach((pr) => {
         renderInfo(`  • ${pr.label}: ${pr.model}`);
       });
-      modelId = (await rl.question("New model id for the active provider (blank to cancel): ")).trim();
+      modelId = ((await prompt.readLine("New model id for the active provider (blank to cancel): ")) ?? "").trim();
       if (!modelId) return;
     }
     prov.model = modelId;
@@ -788,9 +786,8 @@ export async function runCli(): Promise<void> {
     for (const ref of memoryRefs.splice(0))
       renderStored("memory saved", explorerLinks(ref, network), memBackend);
     if (pendingWrites > 0) renderSaving("memory", memBackend); // last turn's write still uploading
-    atPrompt = true;
-    const input = await rl.question(PROMPT);
-    atPrompt = false;
+    const input = await prompt.readLine();
+    if (input === null) break; // EOF / Ctrl-D — exit cleanly
     const trimmed = input.trim();
     if (!trimmed) continue;
 
@@ -980,8 +977,8 @@ export async function runCli(): Promise<void> {
           .catch((err: unknown) => {
             if (pendingWrites > 0) pendingWrites -= 1;
             const m = `Walrus audit flush failed: ${err instanceof Error ? err.message : String(err)}`;
-            if (atPrompt) {
-              printAbovePrompt(() => {
+            if (prompt.isReading()) {
+              prompt.printAbove(() => {
                 renderWarning(m);
               });
             } else renderWarning(m);
@@ -1003,6 +1000,7 @@ export async function runCli(): Promise<void> {
     }
   }
   } finally {
+    prompt.close(); // restore the terminal (raw mode off)
     if (flushMemory) await flushMemory().catch(() => undefined);
   }
 }
