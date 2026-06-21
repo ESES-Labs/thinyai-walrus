@@ -491,12 +491,52 @@ export async function runCli(): Promise<void> {
     },
   });
 
+  const suiBalancesTool = defineTool({
+    name: "sui_balances",
+    description:
+      "Fetch ALL coin balances across ALL of the user's Sui addresses on a network. Use for 'what's " +
+      "my balance / what coins do I have'. Returns each address with its coins. SUI amounts are also " +
+      "given in whole SUI (1 SUI = 1e9 MIST).",
+    parameters: z.object({
+      network: z.enum(["testnet", "mainnet"]).optional().describe("Network (default: the active one)."),
+      address: z.string().optional().describe("Limit to one address (default: all the user's wallets)."),
+    }),
+    execute: async ({ network, address }) => {
+      const net = network ?? suiNetwork;
+      const client =
+        net === suiNetwork && suiSignerRef ? suiSignerRef.client : suiSigner({ network: net }).client;
+      const addrs = address ? [address] : suiWalletsOf(loadConfig()).map((w) => w.address);
+      if (addrs.length === 0) {
+        throw new Error("No Sui wallets configured. Ask the user to set one up (sui_setup).");
+      }
+      const addresses = [];
+      for (const addr of addrs) {
+        const balances = await client.getAllBalances({ owner: addr });
+        addresses.push({
+          address: addr,
+          coins: balances.map((b) => {
+            const symbol = b.coinType.split("::").pop() ?? b.coinType;
+            const isSui = b.coinType.endsWith("::sui::SUI");
+            return {
+              symbol,
+              coinType: b.coinType,
+              balanceMist: b.totalBalance,
+              ...(isSui ? { sui: Number(b.totalBalance) / 1e9 } : {}),
+            };
+          }),
+        });
+      }
+      return { network: net, addresses };
+    },
+  });
+
   const walletTools: Tool[] = [
     suiWalletsTool,
     suiCreateWalletTool,
     suiImportWalletTool,
     suiExportWalletTool,
     suiUseWalletTool,
+    suiBalancesTool,
   ];
 
   // Fetch any URL the user shares (skill.md, docs, JSON, an API/MCP endpoint, …) so the agent can
@@ -611,16 +651,23 @@ export async function runCli(): Promise<void> {
       "sub-agent).\n" +
       "• Sui blockchain — you transact yourself; NEVER tell the user to install a browser wallet. " +
       (suiSignerRef
-        ? `The active wallet is on ${suiNetwork} at ${suiSignerRef.address ?? "?"}. `
-        : "No wallet yet — call sui_create_wallet (or sui_import_wallet) when the user wants Sui, then " +
-          "have them fund the address. ") +
-      "Wallets: sui_wallets (list ALL the user's wallets + addresses — use this to answer 'what's my " +
-      "address / what wallets do I have'), sui_create_wallet (new key pair), sui_import_wallet " +
-      "(restore from a suiprivkey), sui_export_wallet (reveal a private key — only when asked), " +
-      "sui_use_wallet (switch the active wallet). " +
+        ? `Sui IS set up. The user's primary (active) wallet is on ${suiNetwork} at ${suiSignerRef.address ?? "?"}. `
+        : "Sui is NOT set up yet. When the user wants anything Sui-related, FIRST ask if they'd like " +
+          "you to set it up, and ask which network (testnet/mainnet) and which wallet option (generate " +
+          "a new key, import a suiprivkey, or use a Rill agent wallet). Then call sui_setup with their " +
+          "choices. Do not attempt other Sui tools until setup succeeds. ") +
+      "Wallet tools: sui_wallets (list ALL wallets + which is primary/active — answer 'what's my " +
+      "address' from this), sui_balances (ALL coins across ALL addresses on a network — answer " +
+      "'what's my balance' with this), sui_create_wallet, sui_import_wallet, sui_export_wallet (reveal " +
+      "a key only when asked), sui_use_wallet (switch primary). Never overwrite or replace an existing " +
+      "wallet — adding a wallet keeps the others. If it's unclear which wallet to use, ask the user " +
+      "which is their primary. " +
       "On-chain: sui_balance & sui_object (read), sui_transfer (send SUI/any coin — amounts in MIST, " +
       "1 SUI = 1e9), sui_move_call (call ANY Move function), sui_execute_ptb (sign a builder/Rill PTB). " +
-      "Prefer sui_transfer for sends and sui_move_call for contract calls; confirm details before signing.",
+      "Prefer sui_transfer for sends and sui_move_call for contract calls; confirm details before signing.\n" +
+      "When ANY Sui tool fails, do NOT paste raw JSON or stack traces — explain what went wrong in one " +
+      "plain sentence and what to do next. Present balances/results readably (SUI amounts in whole SUI, " +
+      "short addresses), and keep every answer brief and to the point.",
     tools: [echoTool, suiSetupTool, ...walletTools, fetchUrlTool, ...webTools],
     plugins: [
       {
