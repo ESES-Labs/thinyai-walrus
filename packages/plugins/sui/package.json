@@ -1,0 +1,57 @@
+{
+  "name": "@thiny/plugin-sui",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@thiny/core": "workspace:*",
+    "@thiny/signer-sui": "workspace:*",
+    "@mysten/sui": "^2.19.0",
+    "zod": "^3.23.8"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --config ../../tsup.config.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    },
+    "provenance": true
+  },
+  "license": "MIT",
+  "author": "Thiny AI",
+  "description": "Thiny AI — Sui read tools + gated PTB execution (grounded, capped agent transactions)",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thiny-ai/thiny.git",
+    "directory": "packages/plugins/sui"
+  },
+  "homepage": "https://github.com/thiny-ai/thiny/tree/main/packages/plugins/sui#readme",
+  "bugs": {
+    "url": "https://github.com/thiny-ai/thiny/issues"
+  },
+  "keywords": [
+    "ai-agent",
+    "llm",
+    "thiny",
+    "plugin",
+    "sui",
+    "ptb",
+    "web3"
+  ]
+}
