@@ -80,8 +80,9 @@ export class SlashPrompt {
   private finish(value: string | null): void {
     if (this.onKey) this.stdin.off("keypress", this.onKey);
     this.onKey = undefined;
-    if (this.rows > 0) this.stdout.write(`\x1b[${String(this.rows)}B`); // move below the menu
-    this.stdout.write("\r\x1b[0J\n"); // clear, then a clean newline
+    // Cursor is at the end of the typed input line. Clear only what's BELOW (the dropdown) and drop
+    // to a fresh line — the typed "You › …" line stays on screen (don't \r back over it).
+    this.stdout.write("\x1b[0J\n");
     this.rows = 0;
     const r = this.resolver;
     this.resolver = undefined;
