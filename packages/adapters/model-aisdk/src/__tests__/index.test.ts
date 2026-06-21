@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { LanguageModel } from "ai";
+import { type LanguageModel, simulateReadableStream } from "ai";
+import { MockLanguageModelV1 } from "ai/test";
 import { aiSdkModel } from "../index.js";
 
 describe("aiSdkModel — model string resolution", () => {
@@ -101,5 +102,32 @@ describe("aiSdkModel — model string resolution", () => {
         anthropic: { baseURL: "https://my-proxy.example.com" },
       }),
     ).not.toThrow();
+  });
+});
+
+describe("aiSdkModel — stream() error handling", () => {
+  // Regression: a streaming API error (bad model, bad key, rate limit) arrives as an `error`
+  // part on fullStream rather than rejecting. It must surface as a throw, not an empty response.
+  it("throws when the stream emits an error part", async () => {
+    const model = new MockLanguageModelV1({
+      doStream: () =>
+        Promise.resolve({
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "error", error: new Error("model not found") },
+              { type: "finish", finishReason: "error", usage: { promptTokens: 0, completionTokens: 0 } },
+            ],
+          }),
+          rawCall: { rawPrompt: null, rawSettings: {} },
+        }),
+    });
+    const provider = aiSdkModel({ model });
+    await expect(
+      (async () => {
+        for await (const _part of provider.stream([{ role: "user", content: "hi" }], [])) {
+          void _part; // drain
+        }
+      })(),
+    ).rejects.toThrow(/model not found/);
   });
 });

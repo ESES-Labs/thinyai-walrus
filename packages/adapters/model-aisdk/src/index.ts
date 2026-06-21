@@ -180,6 +180,11 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
       for await (const part of result.fullStream) {
         if (part.type === "text-delta") {
           yield { type: "text-delta", text: part.textDelta };
+        } else if (part.type === "error") {
+          // The AI SDK reports API failures (bad model, bad key, rate limit, network) as an
+          // `error` part on fullStream rather than rejecting — surface it instead of ending the
+          // stream silently, which otherwise looks like an empty model response.
+          throw part.error instanceof Error ? part.error : new Error(String(part.error));
         } else if (part.type === "tool-call") {
           yield {
             type: "tool-call",
