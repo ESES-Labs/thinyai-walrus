@@ -97,8 +97,9 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
   const balance = defineTool({
     name: "sui_balance",
     description:
-      "Read a Sui coin balance. Defaults to the agent's own address and SUI when omitted. " +
-      "Returns total balance in MIST plus the coin count.",
+      "Read ONE coin's balance for ONE address (advanced). NOT for 'what's my balance' — use " +
+      "sui_balances for that (all coins, all the user's addresses). USE WHEN: you need a single " +
+      "specific coin's balance for a specific address.",
     parameters: z.object({
       address: z.string().optional().describe("Owner address (default: the agent's address)."),
       coinType: z.string().optional().describe("Coin type, e.g. 0x2::sui::SUI (default: SUI)."),

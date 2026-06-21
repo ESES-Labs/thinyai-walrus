@@ -9,6 +9,7 @@ import type {
   FinishReason,
   StreamEvent,
   Usage,
+  ToolChoice,
 } from "@thiny/core";
 import { toCoreMessages, toAiTools } from "./convert.js";
 
@@ -33,10 +34,21 @@ function normalizeUsage(
   return { inputTokens: usage.promptTokens, outputTokens: usage.completionTokens };
 }
 
+type AiToolChoice =
+  | "auto"
+  | "required"
+  | { type: "tool"; toolName: string };
+
+function toAiToolChoice(choice: ToolChoice | undefined): AiToolChoice {
+  if (choice === "required") return "required";
+  if (choice && typeof choice === "object") return { type: "tool", toolName: choice.tool };
+  return "auto";
+}
+
 /** Build the tool-related fields shared by generateText and streamText. */
-function buildToolOptions(tools: Tool[]) {
+function buildToolOptions(tools: Tool[], choice?: ToolChoice) {
   if (tools.length === 0) return { tools: undefined, toolChoice: undefined };
-  return { tools: toAiTools(tools), toolChoice: "auto" as const };
+  return { tools: toAiTools(tools), toolChoice: toAiToolChoice(choice) };
 }
 
 /** Per-provider connection options. */
@@ -141,11 +153,16 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
   const maxRetries = opts.maxRetries ?? 2;
 
   return {
-    async generate(messages: Message[], tools: Tool[], signal?: AbortSignal): Promise<ModelResponse> {
+    async generate(
+      messages: Message[],
+      tools: Tool[],
+      signal?: AbortSignal,
+      toolChoice?: ToolChoice,
+    ): Promise<ModelResponse> {
       const result = await generateText({
         model,
         messages: toCoreMessages(messages),
-        ...buildToolOptions(tools),
+        ...buildToolOptions(tools, toolChoice),
         maxRetries,
         abortSignal: signal,
       });
@@ -163,11 +180,16 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
       };
     },
 
-    async *stream(messages: Message[], tools: Tool[], signal?: AbortSignal): AsyncGenerator<StreamEvent> {
+    async *stream(
+      messages: Message[],
+      tools: Tool[],
+      signal?: AbortSignal,
+      toolChoice?: ToolChoice,
+    ): AsyncGenerator<StreamEvent> {
       const result = streamText({
         model,
         messages: toCoreMessages(messages),
-        ...buildToolOptions(tools),
+        ...buildToolOptions(tools, toolChoice),
         maxRetries,
         abortSignal: signal,
       });

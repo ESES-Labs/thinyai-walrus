@@ -9,6 +9,14 @@ import type { Tool } from "./tool.js";
  * Adapters (e.g. `@thiny/model-aisdk`) implement it and are injected at
  * construction time via `AgentConfig.model`.
  */
+/**
+ * How the model should choose tools for a call:
+ *   - "auto" (default): the model decides whether/which tool to call.
+ *   - "required": the model MUST call some tool.
+ *   - { tool }: the model MUST call exactly this tool (deterministic routing).
+ */
+export type ToolChoice = "auto" | "required" | { tool: string };
+
 export interface ModelProvider {
   /**
    * Generate a complete response for the given conversation.
@@ -17,7 +25,12 @@ export interface ModelProvider {
    * @param messages - The full conversation history including the current user turn.
    * @param tools    - Tools the model may invoke. Pass an empty array when none are available.
    */
-  generate(messages: Message[], tools: Tool[], signal?: AbortSignal): Promise<ModelResponse>;
+  generate(
+    messages: Message[],
+    tools: Tool[],
+    signal?: AbortSignal,
+    toolChoice?: ToolChoice,
+  ): Promise<ModelResponse>;
 
   /**
    * Stream the response token-by-token.
@@ -30,7 +43,12 @@ export interface ModelProvider {
    * @param messages - The full conversation history including the current user turn.
    * @param tools    - Tools the model may invoke.
    */
-  stream?(messages: Message[], tools: Tool[], signal?: AbortSignal): AsyncIterable<StreamEvent>;
+  stream?(
+    messages: Message[],
+    tools: Tool[],
+    signal?: AbortSignal,
+    toolChoice?: ToolChoice,
+  ): AsyncIterable<StreamEvent>;
 }
 
 /**

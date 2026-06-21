@@ -364,6 +364,34 @@ describe("runLoop", () => {
     expect(runOrder).toContain("start:empty");
   });
 
+  it("forwards a forced toolChoice on the first model call only (then auto)", async () => {
+    const tools = new ToolRegistry();
+    tools.register(
+      defineTool({
+        name: "echo",
+        description: "echo",
+        parameters: z.object({ text: z.string() }),
+        execute: ({ text }) => Promise.resolve(text),
+      }),
+    );
+    const seen: unknown[] = [];
+    const model: ModelProvider = {
+      generate: (_m, _t, _signal, toolChoice): Promise<ModelResponse> => {
+        seen.push(toolChoice);
+        if (seen.length === 1) {
+          return Promise.resolve({
+            finishReason: "tool_calls",
+            toolCalls: [{ id: "c", name: "echo", args: { text: "hi" } }],
+          });
+        }
+        return Promise.resolve({ text: "done", finishReason: "stop" });
+      },
+    };
+    await runLoop("go", makeCtx(model, tools), { toolChoice: { tool: "echo" } });
+    expect(seen[0]).toEqual({ tool: "echo" }); // forced on step 0
+    expect(seen[1]).toBeUndefined(); // auto afterwards
+  });
+
   it("bails gracefully when the model repeats the identical tool call (stuck)", async () => {
     const tools = new ToolRegistry();
     let calls = 0;

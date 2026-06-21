@@ -1,6 +1,7 @@
 import type { Message, ModelResponse } from "./domain/messages.js";
 import type { Tool } from "./tool.js";
 import type { Ctx } from "./context.js";
+import type { ToolChoice } from "./ports.js";
 
 /**
  * The request passed into model middleware.
@@ -11,6 +12,8 @@ export interface ModelRequest {
   messages: Message[];
   /** Tools the model may call this step. */
   tools: Tool[];
+  /** Optional override of how the model picks tools this step (e.g. force a specific tool). */
+  toolChoice?: ToolChoice;
 }
 
 /**

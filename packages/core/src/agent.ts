@@ -1,4 +1,4 @@
-import type { ModelProvider, MemoryBackend, Logger, Approver } from "./ports.js";
+import type { ModelProvider, MemoryBackend, Logger, Approver, ToolChoice } from "./ports.js";
 import type { Tool } from "./tool.js";
 import type { Message } from "./domain/messages.js";
 import type { Signer } from "./signer.js";
@@ -95,7 +95,12 @@ export interface Agent {
    */
   run(
     input: string,
-    opts?: { sessionId?: string; onToken?: (delta: string) => void; signal?: AbortSignal },
+    opts?: {
+      sessionId?: string;
+      onToken?: (delta: string) => void;
+      signal?: AbortSignal;
+      toolChoice?: ToolChoice;
+    },
   ): Promise<string>;
   /** The tool registry for this agent. */
   registry: ToolRegistry;
@@ -152,7 +157,13 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
 
   async function run(
     input: string,
-    opts: { sessionId?: string; onToken?: (delta: string) => void; signal?: AbortSignal } = {},
+    opts: {
+      sessionId?: string;
+      onToken?: (delta: string) => void;
+      signal?: AbortSignal;
+      /** Force tool selection on the FIRST model call this turn (deterministic routing). */
+      toolChoice?: ToolChoice;
+    } = {},
   ): Promise<string> {
     const sessionId = opts.sessionId ?? "default";
     const sessionLogger = logger.child({ sessionId });
@@ -185,9 +196,12 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
 
     const generate = composeModel(extensions.middleware.model, async (req) => {
       if (opts.onToken && config.model.stream) {
-        return assembleStream(config.model.stream(req.messages, req.tools, opts.signal), opts.onToken);
+        return assembleStream(
+          config.model.stream(req.messages, req.tools, opts.signal, req.toolChoice),
+          opts.onToken,
+        );
       }
-      return config.model.generate(req.messages, req.tools, opts.signal);
+      return config.model.generate(req.messages, req.tools, opts.signal, req.toolChoice);
     });
 
     const runComposedTool = composeTool(
@@ -200,7 +214,8 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
 
     const { text, messages } = await runLoop(input, ctx, {
       seed,
-      generate: (msgs, tools) => generate({ messages: msgs, tools }),
+      toolChoice: opts.toolChoice,
+      generate: (msgs, tools, toolChoice) => generate({ messages: msgs, tools, toolChoice }),
       runTool: async (tool, args, c) => {
         const result = await runComposedTool({ tool, args, ctx: c });
         return JSON.stringify(result ?? null);

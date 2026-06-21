@@ -1,6 +1,6 @@
 import type { Ctx } from "./context.js";
-import type { Message } from "./domain/messages.js";
-import type { ModelProvider } from "./ports.js";
+import type { Message, ModelResponse } from "./domain/messages.js";
+import type { ToolChoice } from "./ports.js";
 import type { Tool } from "./tool.js";
 import { MaxStepsError } from "./errors.js";
 
@@ -34,9 +34,15 @@ async function executeToolCall(
 }
 
 export interface RunLoopOptions {
-  generate?: ModelProvider["generate"];
+  generate?: (
+    messages: Message[],
+    tools: Tool[],
+    toolChoice?: ToolChoice,
+  ) => Promise<ModelResponse>;
   runTool?: (tool: Tool, args: unknown, ctx: Ctx) => Promise<string>;
   seed?: Message[];
+  /** Force tool selection on the FIRST model call (deterministic routing for clear intents). */
+  toolChoice?: ToolChoice;
 }
 
 export interface RunLoopResult {
@@ -63,7 +69,8 @@ export async function runLoop(
   ctx: Ctx,
   opts: RunLoopOptions = {},
 ): Promise<RunLoopResult> {
-  const generate = opts.generate ?? ctx.model.generate.bind(ctx.model);
+  const generate =
+    opts.generate ?? ((m: Message[], t: Tool[], tc?: ToolChoice) => ctx.model.generate(m, t, undefined, tc));
   const runTool = opts.runTool ?? validateAndRunTool;
 
   const messages: Message[] = [...(opts.seed ?? []), { role: "user", content: input }];
@@ -78,7 +85,9 @@ export async function runLoop(
   for (let step = 0; step < ctx.maxSteps; step++) {
     // ①
     ctx.events.emit("beforeModelCall", { step, messages });
-    const response = await generate(messages, ctx.tools.all()); // ② THINK
+    // Forced tool choice applies only to the first model call — after that the model is free to
+    // observe the result and produce its final answer.
+    const response = await generate(messages, ctx.tools.all(), step === 0 ? opts.toolChoice : undefined); // ② THINK
     ctx.events.emit("afterModelCall", { step, response });
 
     messages.push({

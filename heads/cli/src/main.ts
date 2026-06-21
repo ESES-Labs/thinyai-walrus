@@ -39,7 +39,7 @@ import { suiSigner, type SuiNetwork, type SuiSigner } from "@thiny/signer-sui";
 import { suiPlugin } from "@thiny/plugin-sui";
 import { mcpHttpPlugin } from "@thiny/mcp";
 import { webSearchPlugin } from "@thiny/plugin-web-search";
-import type { Logger, Plugin, Tool, ModelProvider } from "@thiny/core";
+import type { Logger, Plugin, Tool, ModelProvider, ToolChoice } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
 import {
   loadConfig,
@@ -140,6 +140,21 @@ function parseSkillArgs(): string[] {
 
 let currentSessionId = `cli-${new Date().getTime().toString()}`;
 
+/**
+ * Deterministic routing for unambiguous, READ-ONLY Sui intents: force the exact tool so a weak model
+ * can't mis-route the common "what's my balance / address" asks. Money ops (send) are NOT forced —
+ * those go through the model so it can confirm details first. Returns undefined when unsure (the model
+ * routes normally).
+ */
+function forcedToolFor(input: string): ToolChoice | undefined {
+  const s = input.toLowerCase();
+  if (/\bbalance(s)?\b/.test(s) || /\bhow much .*(sui|coin|token)/.test(s)) return { tool: "sui_balances" };
+  if (/\b(what|show|list)\b.*\b(address|addresses|wallet|wallets)\b/.test(s) || /\bmy (address|wallet)/.test(s)) {
+    return { tool: "sui_wallets" };
+  }
+  return undefined;
+}
+
 const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/new", desc: "Start a new session (long-term memory carries over)" },
   { name: "/connect", desc: "Switch the LLM provider" },
@@ -218,10 +233,10 @@ export async function runCli(): Promise<void> {
   let activeModelName =
     startProvider?.model ?? process.env.THINY_MODEL ?? process.env.AGENT_MODEL ?? "openai:gpt-4o-mini";
   const model: ModelProvider = {
-    generate: (m, t, s) => activeModel.generate(m, t, s),
-    stream: (m, t, s) => {
+    generate: (m, t, s, tc) => activeModel.generate(m, t, s, tc),
+    stream: (m, t, s, tc) => {
       if (!activeModel.stream) throw new Error("active model has no streaming");
-      return activeModel.stream(m, t, s);
+      return activeModel.stream(m, t, s, tc);
     },
   };
 
@@ -312,11 +327,10 @@ export async function runCli(): Promise<void> {
   const suiSetupTool = defineTool({
     name: "sui_setup",
     description:
-      "Set up or change the agent's Sui wallet so it can read balances and sign transactions. " +
-      "Use when the user asks to enable Sui, create/import a wallet, or switch network. Modes: " +
-      "generate (new local key), import (a suiprivkey…), rill (use a Rill MCP signer URL). Takes " +
-      "effect immediately; Rill's builder tools connect on the next start. Always remind the user to " +
-      "fund the returned address.",
+      "USE WHEN: Sui is NOT set up yet and the user wants to enable it / first wallet, or to switch " +
+      "network. This is the FIRST-TIME setup (network + wallet in one step). NOT for adding extra " +
+      "wallets later (use sui_create_wallet / sui_import_wallet). Modes: generate (new local key), " +
+      "import (a suiprivkey…), rill (a Rill MCP signer URL). Always remind the user to fund the address.",
     sensitive: true,
     parameters: z.object({
       network: z.enum(["testnet", "mainnet"]).default("testnet"),
@@ -395,8 +409,9 @@ export async function runCli(): Promise<void> {
   const suiCreateWalletTool = defineTool({
     name: "sui_create_wallet",
     description:
-      "Generate a NEW Sui agent wallet (key pair) locally and save it. Returns the new address — " +
-      "remind the user to fund it. Use when the user asks for a new/another wallet or address.",
+      "USE WHEN: Sui is already set up and the user wants ANOTHER/new wallet or address. Generates a " +
+      "new key pair, keeps existing wallets. NOT for first-time setup (use sui_setup) or restoring a " +
+      "known key (use sui_import_wallet). Remind the user to fund the new address.",
     sensitive: true,
     parameters: z.object({
       label: z.string().optional().describe("A name for the wallet (default: wallet-N)."),
@@ -427,8 +442,8 @@ export async function runCli(): Promise<void> {
   const suiImportWalletTool = defineTool({
     name: "sui_import_wallet",
     description:
-      "Import an existing Sui wallet from its private key (suiprivkey…) and save it. Use when the user " +
-      "wants to add/restore a wallet they already have.",
+      "USE WHEN: the user wants to add/restore a wallet they ALREADY have, by pasting its private key " +
+      "(suiprivkey…). Keeps existing wallets. NOT for generating a fresh wallet (use sui_create_wallet).",
     sensitive: true,
     parameters: z.object({
       secretKey: z.string().min(1).describe("The private key, a suiprivkey… string."),
@@ -975,6 +990,8 @@ export async function runCli(): Promise<void> {
         reply = await agent.run(trimmed, {
           sessionId: currentSessionId,
           signal: ac.signal,
+          toolChoice: forcedToolFor(trimmed), // deterministic routing for clear read-only Sui asks
+
           onToken: (delta) => {
             // Stop the spinner on every token, not just the first: it gets restarted after each tool
             // call, so post-tool tokens would otherwise stream over the live "running…" line and
