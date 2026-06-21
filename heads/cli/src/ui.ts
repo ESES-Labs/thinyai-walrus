@@ -236,3 +236,94 @@ export class Spinner {
 export function clearScreen(): void {
   process.stdout.write("\x1Bc");
 }
+
+// Stats + status line
+
+/** Compact token count: 1234 → "1.2k", 980 → "980". */
+export function formatTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+/** A subtle dim status line under a response: `model · 5.1s · ↑1.5k ↓152 · 2 tools`. */
+export function renderStatus(parts: string[]): void {
+  const shown = parts.filter((p) => p.length > 0);
+  if (shown.length === 0) return;
+  process.stdout.write(DIM(`  ${shown.join("  ·  ")}`) + "\n");
+}
+
+// Walrus "stored" block — compact + dim, with clickable explorer links
+
+export interface StoredLinks {
+  blob: string;
+  tx?: string;
+  object?: string;
+}
+
+export function renderStored(label: string, links: StoredLinks): void {
+  process.stdout.write(SUCCESS_COLOR("  ✓ ") + DIM(`${label} on Walrus`) + "\n");
+  process.stdout.write(DIM(`     ${links.blob}`) + "\n");
+  if (links.tx) process.stdout.write(DIM(`     tx · ${links.tx}`) + "\n");
+  if (links.object) process.stdout.write(DIM(`     obj · ${links.object}`) + "\n");
+}
+
+// Streaming writer that dims `<think>…</think>` reasoning (handles tags split across chunks)
+
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+/** Longest suffix of `s` that is a proper prefix of any tag — held back until the next chunk. */
+function pendingTagLen(s: string): number {
+  let max = 0;
+  for (const tag of [THINK_OPEN, THINK_CLOSE]) {
+    for (let n = Math.min(s.length, tag.length - 1); n > 0; n--) {
+      if (s.endsWith(tag.slice(0, n))) {
+        if (n > max) max = n;
+        break;
+      }
+    }
+  }
+  return max;
+}
+
+export interface StreamWriter {
+  push(delta: string): void;
+  end(): void;
+}
+
+/**
+ * Wrap raw stdout writes so model `<think>…</think>` reasoning renders dim+italic (like Claude Code),
+ * while the answer renders normally. Robust to tags arriving split across streamed chunks.
+ */
+export function createThinkingWriter(write: (s: string) => void): StreamWriter {
+  let inThink = false;
+  let buf = "";
+  const emit = (text: string): void => {
+    if (text.length > 0) write(inThink ? chalk.dim.italic(text) : text);
+  };
+  const drain = (): void => {
+    for (;;) {
+      const open = buf.indexOf(THINK_OPEN);
+      const close = buf.indexOf(THINK_CLOSE);
+      const present = [open, close].filter((i) => i !== -1);
+      if (present.length === 0) break;
+      const idx = Math.min(...present);
+      const isOpen = idx === open;
+      emit(buf.slice(0, idx));
+      inThink = isOpen;
+      buf = buf.slice(idx + (isOpen ? THINK_OPEN.length : THINK_CLOSE.length));
+    }
+    const hold = pendingTagLen(buf);
+    emit(buf.slice(0, buf.length - hold));
+    buf = buf.slice(buf.length - hold);
+  };
+  return {
+    push: (delta) => {
+      buf += delta;
+      drain();
+    },
+    end: () => {
+      emit(buf);
+      buf = "";
+    },
+  };
+}

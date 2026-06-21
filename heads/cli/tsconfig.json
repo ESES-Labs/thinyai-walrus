@@ -17,6 +17,9 @@
     { "path": "../../packages/plugins/trading-policy" },
     { "path": "../../packages/plugins/knowledge" },
     { "path": "../../packages/plugins/resilience" },
+    { "path": "../../packages/adapters/memory-memwal" },
+    { "path": "../../packages/adapters/walrus" },
+    { "path": "../../packages/plugins/agents" },
     { "path": "../../packages/skills" },
     { "path": "../../packages/plugins/agent-skills" }
   ]

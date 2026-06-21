@@ -18,7 +18,21 @@ import {
 } from "@thiny/core";
 import { loadThinyConfig, readThinyConfig } from "@thiny/model-aisdk";
 import { pinoLogger } from "@thiny/logger-pino";
-import { sqliteMemory } from "@thiny/memory-sqlite";
+import { memwalFactsPlugin } from "@thiny/memory-memwal";
+import {
+  walrusClient,
+  walrusMemoryPlugin,
+  filePointerStore,
+  walrusAuditLogger,
+  verifyAuditTrail,
+  explorerLinks,
+  walruscanBlobUrl,
+  type WalrusAuditLogger,
+  type WalrusBlobRef,
+  type WalrusNetwork,
+} from "@thiny/walrus";
+import { agentsPlugin } from "@thiny/plugin-agents";
+import type { Logger, Plugin } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
 import { loadSkills } from "./skills.js";
 import {
@@ -32,8 +46,60 @@ import {
   renderError,
   renderInfo,
   renderWarning,
+  renderStatus,
+  renderStored,
+  createThinkingWriter,
+  formatTokens,
   Spinner,
 } from "./ui.js";
+
+/** Treat "", "0", "false" as off; anything else as on. */
+function envOn(v: string | undefined): boolean {
+  return !!v && v !== "0" && v.toLowerCase() !== "false";
+}
+
+/** Per-turn usage, accumulated from audit records, rendered as a status line (not raw logs). */
+interface TurnStats {
+  inputTokens: number;
+  outputTokens: number;
+  toolCalls: number;
+  modelCalls: number;
+}
+
+function resetTurn(t: TurnStats): void {
+  t.inputTokens = 0;
+  t.outputTokens = 0;
+  t.toolCalls = 0;
+  t.modelCalls = 0;
+}
+
+/** Wrap a logger so audit records feed the status line — and still go to the (file) base logger. */
+function captureStats(base: Logger, turn: TurnStats): Logger {
+  const wrap = (l: Logger): Logger => ({
+    info: (obj, msg) => {
+      if (obj.kind === "model_call") {
+        turn.modelCalls += 1;
+        const usage = obj.usage;
+        if (usage !== null && typeof usage === "object") {
+          const u = usage as { inputTokens?: unknown; outputTokens?: unknown };
+          if (typeof u.inputTokens === "number") turn.inputTokens += u.inputTokens;
+          if (typeof u.outputTokens === "number") turn.outputTokens += u.outputTokens;
+        }
+      } else if (obj.kind === "tool_call") {
+        turn.toolCalls += 1;
+      }
+      l.info(obj, msg);
+    },
+    warn: (obj, msg) => {
+      l.warn(obj, msg);
+    },
+    error: (obj, msg) => {
+      l.error(obj, msg);
+    },
+    child: (b) => wrap(l.child(b)),
+  });
+  return wrap(base);
+}
 
 const echoTool = defineTool({
   name: "echo",
@@ -58,15 +124,57 @@ async function main(): Promise<void> {
   // In TUI mode, write all logs to a file so they never appear in the terminal.
   // Both stdout and stderr map to the same TTY, so only a file truly hides them.
   // Inspect logs with: tail -f ~/.thiny/cli.log
-  const logFile = process.env.THINY_LOG_FILE ?? `${process.env.HOME ?? "."}/thiny-cli.log`;
-  const logger = pinoLogger({ level: process.env.LOG_LEVEL ?? "info", file: logFile });
+  // Always write logs to a FILE, never the terminal. (An empty THINY_LOG_FILE must NOT fall through
+  // to pino's stdout default — that's what dumped raw JSON into the chat.)
+  const envLogFile = process.env.THINY_LOG_FILE?.trim();
+  const logFile =
+    envLogFile && envLogFile.length > 0 ? envLogFile : `${process.env.HOME ?? "."}/thiny-cli.log`;
+  const fileLogger = pinoLogger({ level: process.env.LOG_LEVEL ?? "info", file: logFile });
+
+  // Capture audit records into per-turn stats (rendered as a status line, not raw logs).
+  const turn: TurnStats = { inputTokens: 0, outputTokens: 0, toolCalls: 0, modelCalls: 0 };
+  const session = { inputTokens: 0, outputTokens: 0, toolCalls: 0, turns: 0 };
+  const logger = captureStats(fileLogger, turn);
 
   const activeModelName =
     process.env.THINY_MODEL ?? process.env.AGENT_MODEL ?? "openai:gpt-4o-mini";
   const personaName = process.env.THINY_PERSONA_NAME ?? "Thiny";
   const model = loadThinyConfig();
 
-  const memory = await sqliteMemory({ url: process.env.SESSION_DB ?? "file:thiny.sqlite" });
+  // ── Walrus ──────────────────────────────────────────────────────────────────
+  // One blob client powers both cross-session memory (default) and the optional audit trail.
+  const network: WalrusNetwork = process.env.WALRUS_NETWORK === "mainnet" ? "mainnet" : "testnet";
+  const walrus = walrusClient({
+    network,
+    publisher: process.env.WALRUS_PUBLISHER_URL,
+    aggregator: process.env.WALRUS_AGGREGATOR_URL,
+  });
+  // WALRUS_AUDIT=1 → tee every turn's action log into an immutable Walrus blob.
+  const walrusAudit: WalrusAuditLogger | null = envOn(process.env.WALRUS_AUDIT)
+    ? walrusAuditLogger(logger, walrus, { sessionId: currentSessionId })
+    : null;
+  // The audit-wrapped logger captures structured records AND forwards to pino (file).
+  const agentLogger = walrusAudit ?? logger;
+
+  // ── Cross-session memory: Walrus-native by default (portable, persistent, no SQLite) ──
+  // Durable facts live on Walrus and are auto-injected each turn. MemWal (semantic) when provisioned.
+  const userId = process.env.THINY_USER_ID ?? "default";
+  const memwalEnabled = !!process.env.MEMWAL_DELEGATE_KEY && !!process.env.MEMWAL_ACCOUNT_ID;
+  // Walrus blobs that memory landed in this turn; drained + rendered after the run completes.
+  const memoryRefs: WalrusBlobRef[] = [];
+  const memoryPlugin: Plugin = memwalEnabled
+    ? memwalFactsPlugin({
+        delegateKey: process.env.MEMWAL_DELEGATE_KEY,
+        accountId: process.env.MEMWAL_ACCOUNT_ID,
+        serverUrl: process.env.MEMWAL_SERVER_URL,
+        namespace: process.env.MEMWAL_NAMESPACE ?? userId,
+      })
+    : walrusMemoryPlugin({
+        client: walrus,
+        pointers: filePointerStore(process.env.WALRUS_POINTERS ?? "thiny-pointers.json"),
+        userId,
+        onStore: (ref) => memoryRefs.push(ref),
+      });
 
   // Skills: merge thiny.config.json "skills" array with CLI --skills flag.
 
@@ -90,18 +198,27 @@ async function main(): Promise<void> {
 
   const agent = await createAgent({
     model,
-    logger,
-    memory,
+    logger: agentLogger,
     persona,
     systemPrompt:
-      "You are a helpful AI assistant. Use tools when they help you answer better. Be concise.",
+      "You are a helpful AI assistant. Use tools when they help you answer better. Be concise.\n\n" +
+      "MEMORY: You have persistent long-term memory across sessions, stored on Walrus. What you " +
+      "already know about the user is injected automatically at the start of each conversation under " +
+      "“[User Memory …]”. When the user shares anything durable about themselves — their name, role, " +
+      "preferences, projects, or goals, even casually — immediately call remember_fact to save it. " +
+      "If asked what you remember, answer from the injected user memory (or call recall_memory). " +
+      "You DO remember across sessions — never say you lack memory or that each session starts fresh.\n\n" +
+      "For multi-step work, call update_plan to track steps and delegate_task to hand focused " +
+      "sub-problems to a sub-agent.",
     tools: [echoTool],
     plugins: [
       {
         name: "observability",
-        modelMiddleware: [modelAuditMiddleware(logger), budget],
-        toolMiddleware: [toolAuditMiddleware(logger)],
+        modelMiddleware: [modelAuditMiddleware(agentLogger), budget],
+        toolMiddleware: [toolAuditMiddleware(agentLogger)],
       },
+      agentsPlugin(),
+      memoryPlugin,
       ...skillPlugins,
     ],
   });
@@ -146,6 +263,11 @@ async function main(): Promise<void> {
   });
   renderHints(logFile);
   for (const w of skillWarnings) renderWarning(w);
+  renderInfo(
+    `Memory: ${memwalEnabled ? "MemWal (semantic)" : "Walrus"} · cross-session, portable (user: ${userId})`,
+  );
+  if (walrusAudit)
+    renderInfo(`Walrus audit: ON (${network}) — each turn's action log is stored + verifiable`);
 
   // REPL
   const rl = createInterface({ input: stdin, output: stdout });
@@ -161,10 +283,12 @@ async function main(): Promise<void> {
       const cmd = parts[0];
       // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
       switch (cmd) {
-        case "new":
+        case "new": {
+          // Long-term memory (facts on Walrus) persists automatically — just rotate the transcript.
           currentSessionId = `cli-${new Date().getTime().toString()}`;
-          renderInfo("New session started");
+          renderInfo("New session started — long-term memory carries over");
           break;
+        }
         case "tools":
           renderInfo(
             `\nTools:\n${agent.registry
@@ -183,6 +307,36 @@ async function main(): Promise<void> {
         case "session":
           renderInfo(`Session: ${currentSessionId}`);
           break;
+        case "stats":
+          renderInfo(
+            `\nSession ${currentSessionId.slice(-8)} · ${String(session.turns)} turn${session.turns === 1 ? "" : "s"}\n` +
+              `  tokens: ↑${formatTokens(session.inputTokens)} ↓${formatTokens(session.outputTokens)}\n` +
+              `  tool calls: ${String(session.toolCalls)}\n`,
+          );
+          break;
+        case "verify": {
+          const blobId = parts[1];
+          if (!blobId) {
+            renderWarning("usage: /verify <blobId>");
+            break;
+          }
+          try {
+            const trail = await verifyAuditTrail(walrus, blobId);
+            renderInfo(
+              `\nAudit trail ${blobId}\n  session: ${trail.sessionId}  ·  ${String(trail.count)} entries  ·  ${trail.createdAt}`,
+            );
+            for (const e of trail.entries) {
+              const what =
+                typeof e.kind === "string" ? e.kind : typeof e.event === "string" ? e.event : "";
+              const tool = typeof e.tool === "string" ? ` (${e.tool})` : "";
+              renderInfo(`  • [${e.level}] ${what}${tool}`);
+            }
+            renderInfo(`\n  source: ${walruscanBlobUrl(blobId, network)}\n`);
+          } catch (err: unknown) {
+            renderError(err instanceof Error ? err.message : String(err));
+          }
+          break;
+        }
         case "clear":
           clearScreen();
           renderHeader({ model: activeModelName, session: currentSessionId, persona: personaName });
@@ -194,7 +348,9 @@ async function main(): Promise<void> {
           renderHints(logFile);
           break;
         case "help":
-          renderInfo("\n/new · /tools · /skills · /session · /clear · /help\n");
+          renderInfo(
+            "\n/new · /tools · /skills · /stats · /session · /verify <blobId> · /clear · /help\n",
+          );
           break;
         default:
           renderWarning(`Unknown command: /${cmd ?? ""}  — try /help`);
@@ -207,9 +363,12 @@ async function main(): Promise<void> {
     spinner.start("thinking…");
 
     budget.reset(); // reset per-turn counters before each run
+    resetTurn(turn);
+    const startedAt = Date.now();
 
     try {
       let firstToken = true;
+      const stream = createThinkingWriter((s) => stdout.write(s));
       const toolHandler = (payload: unknown): void => {
         const { call } = payload as { call: { name: string } };
         spinner.stop();
@@ -225,24 +384,51 @@ async function main(): Promise<void> {
             spinner.stop();
             firstToken = false;
           }
-          stdout.write(delta);
+          stream.push(delta);
         },
       });
 
       agent.events.off("beforeToolCall", toolHandler);
       spinner.stop();
 
-      // If streaming emitted no tokens but agent returned text (non-streaming fallback),
-      // print it now. Also handle the case where model returned genuinely empty text.
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
       if (firstToken) {
-        // Streaming emitted no tokens — print reply from blocking generate() fallback,
-        // or show a notice if the model returned nothing.
-
-        stdout.write(reply || "\x1b[2m(model returned empty response)\x1b[0m");
+        // No streaming tokens — render the blocking reply (or an empty-response notice).
+        stream.push(reply.length > 0 ? reply : "\x1b[2m(model returned empty response)\x1b[0m");
       }
+      stream.end();
 
       renderAgentDone();
+
+      // Clean status line — replaces the raw session_end JSON.
+      const durMs = Date.now() - startedAt;
+      session.turns += 1;
+      session.inputTokens += turn.inputTokens;
+      session.outputTokens += turn.outputTokens;
+      session.toolCalls += turn.toolCalls;
+      renderStatus([
+        activeModelName,
+        `${(durMs / 1000).toFixed(1)}s`,
+        `↑${formatTokens(turn.inputTokens)} ↓${formatTokens(turn.outputTokens)}`,
+        turn.toolCalls > 0 ? `${String(turn.toolCalls)} tool${turn.toolCalls === 1 ? "" : "s"}` : "",
+      ]);
+
+      // Memory landed on Walrus this turn → show its verifiable blob(s).
+      for (const ref of memoryRefs) renderStored("memory", explorerLinks(ref, network));
+      memoryRefs.length = 0;
+
+      // Store this turn's action log on Walrus and print its tamper-evident link.
+      if (walrusAudit) {
+        try {
+          const ref = await walrusAudit.flush(currentSessionId);
+          walrusAudit.reset();
+          if (ref) renderStored("audit trail", explorerLinks(ref, network));
+        } catch (err: unknown) {
+          renderWarning(
+            `Walrus audit flush failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     } catch (err: unknown) {
       spinner.stop();
       renderError(err instanceof Error ? err.message : String(err));
