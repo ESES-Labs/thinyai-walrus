@@ -49,7 +49,7 @@ import {
   renderStatus,
   renderStored,
   renderSaving,
-  createThinkingWriter,
+  createMarkdownWriter,
   formatTokens,
   Spinner,
 } from "./ui.js";
@@ -410,7 +410,7 @@ async function main(): Promise<void> {
 
     try {
       let firstToken = true;
-      const stream = createThinkingWriter((s) => stdout.write(s));
+      const stream = createMarkdownWriter((s) => stdout.write(s));
       const toolHandler = (payload: unknown): void => {
         const { call } = payload as { call: { name: string } };
         spinner.stop();

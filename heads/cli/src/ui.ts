@@ -287,15 +287,79 @@ export interface StreamWriter {
   end(): void;
 }
 
+// ── Markdown rendering (terminal) ────────────────────────────────────────────
+
+const OSC8 = (url: string, text: string): string => `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`;
+
+/** Render inline markdown (bold/italic/code/strike/links) in a single line to ANSI. */
+export function renderInline(s: string): string {
+  const codes: string[] = [];
+  // Protect `code` spans first so their contents aren't treated as other markup.
+  s = s.replace(/`([^`]+)`/g, (_m, c: string) => {
+    codes.push(c);
+    return ` ${String(codes.length - 1)} `;
+  });
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, (_m, t: string) => chalk.bold(t));
+  s = s.replace(/\*([^*\n]+)\*/g, (_m, t: string) => chalk.italic(t)); // single * — after **
+  s = s.replace(/~~([^~\n]+)~~/g, (_m, t: string) => chalk.strikethrough(t));
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text: string, url: string) =>
+    OSC8(url, chalk.cyan.underline(text)),
+  );
+  // eslint-disable-next-line no-control-regex -- null-char placeholder for code spans
+  s = s.replace(/ (\d+) /g, (_m, i: string) => chalk.cyan(codes[Number(i)] ?? ""));
+  return s;
+}
+
+/** Render one markdown line (block + inline) to ANSI. `inCode` tracks fenced code across lines. */
+export function renderMarkdownLine(
+  line: string,
+  inCode: boolean,
+  setCode: (v: boolean) => void,
+): string {
+  const trimmed = line.replace(/^\s+/, "");
+  const indent = line.slice(0, line.length - trimmed.length);
+  if (trimmed.startsWith("```")) {
+    setCode(!inCode);
+    return ""; // hide the fence marker itself
+  }
+  if (inCode) return chalk.cyan(line); // code body — verbatim, no inline parsing
+  const h = /^(#{1,6})\s+(.*)$/.exec(trimmed);
+  if (h) return ((h[1] ?? "").length <= 2 ? chalk.bold.underline : chalk.bold)(renderInline(h[2] ?? ""));
+  if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) return chalk.dim("─".repeat(Math.min(getWidth(), 50)));
+  const q = /^>\s?(.*)$/.exec(trimmed);
+  if (q) return chalk.dim(`│ ${renderInline(q[1] ?? "")}`);
+  const b = /^[-*+]\s+(.*)$/.exec(trimmed);
+  if (b) return `${indent}${chalk.cyan("•")} ${renderInline(b[1] ?? "")}`;
+  const n = /^(\d+)[.)]\s+(.*)$/.exec(trimmed);
+  if (n) return `${indent}${chalk.cyan(`${n[1] ?? ""}.`)} ${renderInline(n[2] ?? "")}`;
+  return renderInline(line);
+}
+
 /**
  * Wrap raw stdout writes so model `<think>…</think>` reasoning renders dim+italic (like Claude Code),
- * while the answer renders normally. Robust to tags arriving split across streamed chunks.
+ * while the answer renders as markdown. The answer is buffered per line (so split markers like `**`
+ * across stream chunks still render correctly) and flushed on each newline; think text streams live.
  */
-export function createThinkingWriter(write: (s: string) => void): StreamWriter {
+export function createMarkdownWriter(write: (s: string) => void): StreamWriter {
   let inThink = false;
-  let buf = "";
-  const emit = (text: string): void => {
-    if (text.length > 0) write(inThink ? chalk.dim.italic(text) : text);
+  let inCode = false;
+  let buf = ""; // raw incoming, for <think> tag splitting
+  let line = ""; // answer line accumulator
+
+  const flushLine = (newline: boolean): void => {
+    write(renderMarkdownLine(line, inCode, (v) => (inCode = v)) + (newline ? "\n" : ""));
+    line = "";
+  };
+  const emit = (text: string, think: boolean): void => {
+    if (!text) return;
+    if (think) {
+      write(chalk.dim.italic(text)); // reasoning streams live, no markdown
+      return;
+    }
+    for (const ch of text) {
+      if (ch === "\n") flushLine(true);
+      else line += ch;
+    }
   };
   const drain = (): void => {
     for (;;) {
@@ -305,12 +369,13 @@ export function createThinkingWriter(write: (s: string) => void): StreamWriter {
       if (present.length === 0) break;
       const idx = Math.min(...present);
       const isOpen = idx === open;
-      emit(buf.slice(0, idx));
+      emit(buf.slice(0, idx), inThink);
+      if (isOpen && line) flushLine(false); // flush answer text before a think block starts
       inThink = isOpen;
       buf = buf.slice(idx + (isOpen ? THINK_OPEN.length : THINK_CLOSE.length));
     }
     const hold = pendingTagLen(buf);
-    emit(buf.slice(0, buf.length - hold));
+    emit(buf.slice(0, buf.length - hold), inThink);
     buf = buf.slice(buf.length - hold);
   };
   return {
@@ -319,8 +384,9 @@ export function createThinkingWriter(write: (s: string) => void): StreamWriter {
       drain();
     },
     end: () => {
-      emit(buf);
+      emit(buf, inThink);
       buf = "";
+      if (line) flushLine(false); // partial final line (no trailing newline)
     },
   };
 }

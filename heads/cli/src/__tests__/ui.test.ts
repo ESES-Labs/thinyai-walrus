@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import chalk from "chalk";
-import { createThinkingWriter, formatTokens } from "../ui.js";
+import { createMarkdownWriter, formatTokens } from "../ui.js";
 
 // Force colors so we can assert that think segments are styled (vitest has no TTY).
 beforeAll(() => {
@@ -13,13 +13,13 @@ const strip = (s: string) => s.replace(ANSI, "");
 
 function collect(chunks: string[]): { writes: string[]; plain: string } {
   const writes: string[] = [];
-  const w = createThinkingWriter((s) => writes.push(s));
+  const w = createMarkdownWriter((s) => writes.push(s));
   for (const c of chunks) w.push(c);
   w.end();
   return { writes, plain: strip(writes.join("")) };
 }
 
-describe("createThinkingWriter", () => {
+describe("createMarkdownWriter — think handling", () => {
   it("keeps all text (minus the tags) and dims the think segment", () => {
     const { writes, plain } = collect(["Hello <think>reasoning</think> world"]);
     expect(plain).toBe("Hello reasoning world");
@@ -38,6 +38,32 @@ describe("createThinkingWriter", () => {
     const { writes, plain } = collect(["just an answer"]);
     expect(plain).toBe("just an answer");
     expect(writes.join("")).not.toMatch(ANSI);
+  });
+});
+
+describe("createMarkdownWriter — markdown", () => {
+  it("renders bold / italic / inline code to styled text (markers stripped)", () => {
+    const { writes, plain } = collect(["**bold** and *it* and `code` and 5 ms"]);
+    expect(plain).toBe("bold and it and code and 5 ms"); // markers gone, literal "5 ms" intact
+    expect(writes.join("")).toMatch(ANSI); // and it was styled
+  });
+
+  it("renders markers that arrive split across stream chunks", () => {
+    const { plain } = collect(["He said **bo", "ld** then done\n"]);
+    expect(plain).toBe("He said bold then done\n");
+  });
+
+  it("renders headers and bullet lists", () => {
+    const { plain } = collect(["# Title\n", "- one\n", "- two\n"]);
+    expect(plain).toContain("Title");
+    expect(plain).toContain("• one");
+    expect(plain).toContain("• two");
+  });
+
+  it("keeps a fenced code block verbatim and hides the fences", () => {
+    const { plain } = collect(["```ts\n", "const x = 1\n", "```\n", "done\n"]);
+    expect(plain).toContain("const x = 1");
+    expect(plain).not.toContain("```");
   });
 });
 
