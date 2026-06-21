@@ -121,7 +121,7 @@ function parseSkillArgs(): string[] {
 
 let currentSessionId = `cli-${new Date().getTime().toString()}`;
 
-async function main(): Promise<void> {
+export async function runCli(): Promise<void> {
   // In TUI mode, write all logs to a file so they never appear in the terminal.
   // Both stdout and stderr map to the same TTY, so only a file truly hides them.
   // Inspect logs with: tail -f ~/.thiny/cli.log
@@ -499,8 +499,3 @@ async function main(): Promise<void> {
     if (flushMemory) await flushMemory().catch(() => undefined);
   }
 }
-
-main().catch((err: unknown) => {
-  process.stderr.write(`Fatal: ${String(err)}\n`);
-  process.exit(1);
-});

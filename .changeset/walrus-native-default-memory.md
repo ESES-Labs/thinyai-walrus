@@ -1,6 +1,6 @@
 ---
 "@thiny/walrus": minor
-"@thiny/cli": minor
+"thinyai": minor
 ---
 
 Make cross-session memory Walrus-native by default; remove the SQLite-based `@thiny/plugin-user-memory`.

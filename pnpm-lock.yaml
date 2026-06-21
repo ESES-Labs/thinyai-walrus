@@ -145,6 +145,41 @@ importers:
 
   heads/cli:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^1.0.0
+        version: 1.2.12(zod@3.25.76)
+      '@ai-sdk/openai':
+        specifier: ^1.3.0
+        version: 1.3.24(zod@3.25.76)
+      '@clack/prompts':
+        specifier: ^1.6.0
+        version: 1.6.0
+      '@mysten/sui':
+        specifier: ^2.19.0
+        version: 2.19.0(typescript@5.9.3)
+      ai:
+        specifier: ^4.0.0
+        version: 4.3.19(react@19.2.6)(zod@3.25.76)
+      chalk:
+        specifier: ^5.3.0
+        version: 5.6.2
+      figlet:
+        specifier: ^1.8.0
+        version: 1.11.0
+      pino:
+        specifier: ^9.2.0
+        version: 9.14.0
+      pino-pretty:
+        specifier: ^13.0.0
+        version: 13.1.3
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+    optionalDependencies:
+      '@mysten-incubation/memwal':
+        specifier: ^0.0.7
+        version: 0.0.7(@mysten/seal@1.2.1(@mysten/sui@2.19.0(typescript@5.9.3)))(@mysten/sui@2.19.0(typescript@5.9.3))(ai@4.3.19(react@19.2.6)(zod@3.25.76))(zod@3.25.76)
+    devDependencies:
       '@thiny/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -157,64 +192,18 @@ importers:
       '@thiny/memory-memwal':
         specifier: workspace:*
         version: link:../../packages/adapters/memory-memwal
-      '@thiny/memory-sqlite':
-        specifier: workspace:*
-        version: link:../../packages/adapters/memory-sqlite
       '@thiny/model-aisdk':
         specifier: workspace:*
         version: link:../../packages/adapters/model-aisdk
-      '@thiny/plugin-agent-skills':
-        specifier: workspace:*
-        version: link:../../packages/plugins/agent-skills
       '@thiny/plugin-agents':
         specifier: workspace:*
         version: link:../../packages/plugins/agents
-      '@thiny/plugin-evm':
-        specifier: workspace:*
-        version: link:../../packages/plugins/evm
-      '@thiny/plugin-knowledge':
-        specifier: workspace:*
-        version: link:../../packages/plugins/knowledge
-      '@thiny/plugin-market':
-        specifier: workspace:*
-        version: link:../../packages/plugins/market
-      '@thiny/plugin-resilience':
-        specifier: workspace:*
-        version: link:../../packages/plugins/resilience
-      '@thiny/plugin-solana':
-        specifier: workspace:*
-        version: link:../../packages/plugins/solana
-      '@thiny/plugin-tokens':
-        specifier: workspace:*
-        version: link:../../packages/plugins/tokens
-      '@thiny/plugin-trading-policy':
-        specifier: workspace:*
-        version: link:../../packages/plugins/trading-policy
-      '@thiny/plugin-web-search':
-        specifier: workspace:*
-        version: link:../../packages/plugins/web-search
       '@thiny/skills':
         specifier: workspace:*
         version: link:../../packages/skills
       '@thiny/walrus':
         specifier: workspace:*
         version: link:../../packages/adapters/walrus
-      chalk:
-        specifier: ^5.3.0
-        version: 5.6.2
-      figlet:
-        specifier: ^1.8.0
-        version: 1.11.0
-      ora:
-        specifier: ^8.1.0
-        version: 8.2.0
-      viem:
-        specifier: ^2.17.0
-        version: 2.51.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@6.0.6)(zod@3.25.76)
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
-    devDependencies:
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(@microsoft/api-extractor@7.58.8(@types/node@20.19.41))(jiti@1.21.7)(postcss@8.5.15)(tsx@4.22.3)(typescript@5.9.3)(yaml@2.9.0)
@@ -3461,7 +3450,6 @@ packages:
 
   libsql@0.3.19:
     resolution: {integrity: sha512-Aj5cQ5uk/6fHdmeW0TiXK42FqUlwx7ytmMLPSaUQPin5HKKKuUPD62MAbN4OEweGBBI7q1BekoEN4gPUEL6MZA==}
-    cpu: [x64, arm64, wasm32]
     os: [darwin, linux, win32]
 
   lilconfig@3.1.3:
@@ -5058,6 +5046,16 @@ snapshots:
     optionalDependencies:
       zod: 3.25.76
 
+  '@ai-sdk/react@1.2.12(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider-utils': 2.2.8(zod@3.25.76)
+      '@ai-sdk/ui-utils': 1.2.11(zod@3.25.76)
+      swr: 2.4.1
+      throttleit: 2.1.0
+    optionalDependencies:
+      zod: 3.25.76
+    optional: true
+
   '@ai-sdk/ui-utils@1.2.11(zod@3.25.76)':
     dependencies:
       '@ai-sdk/provider': 1.1.3
@@ -5855,7 +5853,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@mysten-incubation/memwal@0.0.7(@mysten/seal@1.2.1(@mysten/sui@2.19.0(typescript@5.9.3)))(@mysten/sui@2.19.0(typescript@5.9.3))(ai@4.3.19(zod@3.25.76))(zod@3.25.76)':
+  '@mysten-incubation/memwal@0.0.7(@mysten/seal@1.2.1(@mysten/sui@2.19.0(typescript@5.9.3)))(@mysten/sui@2.19.0(typescript@5.9.3))(ai@4.3.19(react@19.2.6)(zod@3.25.76))(zod@3.25.76)':
     dependencies:
       '@mysten/seal': 1.2.1(@mysten/sui@2.19.0(typescript@5.9.3))
       '@mysten/sui': 2.19.0(typescript@5.9.3)
@@ -5863,6 +5861,17 @@ snapshots:
       '@noble/hashes': 2.2.0
     optionalDependencies:
       ai: 4.3.19(react@19.2.6)(zod@3.25.76)
+      zod: 3.25.76
+    optional: true
+
+  '@mysten-incubation/memwal@0.0.7(@mysten/seal@1.2.1(@mysten/sui@2.19.0(typescript@5.9.3)))(@mysten/sui@2.19.0(typescript@5.9.3))(ai@4.3.19(zod@3.25.76))(zod@3.25.76)':
+    dependencies:
+      '@mysten/seal': 1.2.1(@mysten/sui@2.19.0(typescript@5.9.3))
+      '@mysten/sui': 2.19.0(typescript@5.9.3)
+      '@noble/ed25519': 2.3.0
+      '@noble/hashes': 2.2.0
+    optionalDependencies:
+      ai: 4.3.19(zod@3.25.76)
       zod: 3.25.76
     optional: true
 
@@ -6706,6 +6715,17 @@ snapshots:
       zod: 3.25.76
     optionalDependencies:
       react: 19.2.6
+
+  ai@4.3.19(zod@3.25.76):
+    dependencies:
+      '@ai-sdk/provider': 1.1.3
+      '@ai-sdk/provider-utils': 2.2.8(zod@3.25.76)
+      '@ai-sdk/react': 1.2.12(zod@3.25.76)
+      '@ai-sdk/ui-utils': 1.2.11(zod@3.25.76)
+      '@opentelemetry/api': 1.9.0
+      jsondiffpatch: 0.6.0
+      zod: 3.25.76
+    optional: true
 
   ajv-draft-04@1.0.0(ajv@8.18.0):
     optionalDependencies:
@@ -9236,6 +9256,12 @@ snapshots:
       supports-color: 7.2.0
 
   supports-preserve-symlinks-flag@1.0.0: {}
+
+  swr@2.4.1:
+    dependencies:
+      dequal: 2.0.3
+      use-sync-external-store: 1.6.0(react@18.3.1)
+    optional: true
 
   swr@2.4.1(react@19.2.6):
     dependencies:

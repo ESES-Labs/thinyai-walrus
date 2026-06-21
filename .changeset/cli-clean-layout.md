@@ -1,5 +1,5 @@
 ---
-"@thiny/cli": patch
+"thinyai": patch
 ---
 
 Clean up the chat layout. The user's message is no longer rendered twice (the `You › …` prompt echo

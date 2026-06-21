@@ -26,11 +26,17 @@ Most agent frameworks are built to _run a product_. Thiny is built for developer
 
 ## Install the `thiny` CLI
 
+Once published to npm, install it globally with any package manager — the command is `thiny`:
+
 ```bash
-# one-liner — clones, installs, and links `thiny` onto your PATH
+bun add -g thinyai      # or:  npm i -g thinyai   /   pnpm add -g thinyai
+```
+
+Or run from a clone (no publish needed) — links `thiny` onto your PATH via `tsx`:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/ESES-Labs/thinyai-walrus/main/install.sh | bash
-# or, from a clone:
-git clone https://github.com/ESES-Labs/thinyai-walrus && cd thinyai-walrus && bash install.sh
+# or:  git clone https://github.com/ESES-Labs/thinyai-walrus && cd thinyai-walrus && bash install.sh
 ```
 
 Then just run it — first launch walks you through setup (model + agent name), no `.env` to edit:
@@ -38,14 +44,15 @@ Then just run it — first launch walks you through setup (model + agent name), 
 ```bash
 thiny            # start the agent (runs first-time setup if needed)
 thiny sui init   # add Sui capabilities: network + wallet (paste / generate / Rill agent wallet)
-thiny web        # start the HTTP server  (also: thiny daemon, thiny walrus-demo)
 thiny help       # all commands
 ```
 
 Config lives in `~/.thiny/config.json` (chmod `0600` — it holds your API key and Sui key). After
 `thiny sui init`, **fund the printed address** before sending transactions.
 
-> `bun add -g` / `pnpm add -g @thiny/cli` will work once published to npm; until then use `install.sh` above.
+> The global package is **`thinyai`** (self-contained, the `@thiny/*` packages are bundled in). To
+> publish: `pnpm --filter thinyai build && cd heads/cli && npm publish`. `thiny web` / `daemon` /
+> `walrus-demo` are dev heads — run those from a clone (`pnpm web`, etc.).
 
 ---
 

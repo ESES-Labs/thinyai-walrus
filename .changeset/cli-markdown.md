@@ -1,5 +1,5 @@
 ---
-"@thiny/cli": patch
+"thinyai": patch
 ---
 
 Render markdown in the chat output (like Claude Code / opencode): **bold**, *italic*, `inline code`,

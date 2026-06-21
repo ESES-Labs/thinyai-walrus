@@ -189,11 +189,11 @@ const PACKAGES: PkgMeta[] = [
   },
   // ── Heads (publishable only) ─────────────────────────────────
   {
-    name: "@thiny/cli",
+    name: "thinyai",
     dir: "heads/cli",
     description:
-      "Thiny AI — beautiful TUI agent CLI with interactive chat and tool execution",
-    keywords: ["ai-agent", "llm", "thiny", "cli", "tui", "terminal", "interactive"],
+      "Thiny AI — a beautiful terminal agent: interactive chat, tools, Walrus memory, and Sui execution.",
+    keywords: ["ai-agent", "llm", "thiny", "cli", "tui", "terminal", "walrus", "sui", "interactive"],
   },
   // ── Apps (publishable only) ──────────────────────────────────
   {

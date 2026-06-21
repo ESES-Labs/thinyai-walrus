@@ -1,6 +1,6 @@
 ---
 "@thiny/walrus": patch
-"@thiny/cli": patch
+"thinyai": patch
 ---
 
 Show a non-blocking "saving…" indicator for background Walrus memory writes, and surface the
