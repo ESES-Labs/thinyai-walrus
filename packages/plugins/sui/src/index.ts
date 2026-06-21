@@ -63,6 +63,37 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
   };
   const requireSimSuccess = opts.policy?.requireSimSuccess ?? true;
 
+  // Shared gated path for every transaction the plugin signs (built here or received as a PTB):
+  // re-simulate → soft policy → approval gate → sign + submit.
+  const executeTx = async (
+    tx: Transaction,
+    toolName: string,
+    approvalArgs: Record<string, unknown>,
+    reason: string,
+  ): Promise<{ digest: string; effects: unknown; explorerUrl: string }> => {
+    const signer = signerOrThrow();
+    const sim = await signer.devInspect(tx);
+    const status = sim.effects.status.status;
+    if (requireSimSuccess && status !== "success") {
+      throw new Error(`${toolName}: simulation failed (${sim.effects.status.error ?? status})`);
+    }
+    if (opts.policy?.maxGasBudgetMist !== undefined) {
+      const gas = sim.effects.gasUsed as GasUsed;
+      const estGas = BigInt(gas.computationCost) + BigInt(gas.storageCost);
+      if (estGas > opts.policy.maxGasBudgetMist) {
+        throw new Error(
+          `${toolName}: estimated gas ${estGas.toString()} MIST exceeds policy cap ${opts.policy.maxGasBudgetMist.toString()}.`,
+        );
+      }
+    }
+    if (opts.approver) {
+      const ok = await opts.approver({ tool: toolName, args: approvalArgs, reason });
+      if (!ok) throw new Error(`${toolName}: rejected by approver.`);
+    }
+    const { digest, effects } = await signer.signAndExecute(tx);
+    return { digest, effects, explorerUrl: explorerTxUrl(signer.network, digest) };
+  };
+
   const balance = defineTool({
     name: "sui_balance",
     description:
@@ -123,46 +154,111 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
         .describe("The builder's unsigned PTB — base64 of a serialized Sui transaction."),
     }),
     execute: async ({ unsignedPtb }) => {
-      const signer = signerOrThrow();
-      // 1. Deserialize: Rill sends base64 of the serialized tx (`Buffer.from(tx.serialize()).toString("base64")`);
-      //    decode, then rebuild. The signer adds sender + gas at sign time.
+      // Rill sends base64 of the serialized tx; decode → rebuild. The signer adds sender + gas.
       const tx = Transaction.from(Buffer.from(unsignedPtb, "base64").toString("utf8"));
-
-      // 2. Re-simulate (defense-in-depth — catch drift since the builder's sim; no gas, no signature).
-      const sim = await signer.devInspect(tx);
-      const status = sim.effects.status.status;
-      if (requireSimSuccess && status !== "success") {
-        throw new Error(
-          `sui_execute_ptb: simulation failed (${sim.effects.status.error ?? status})`,
-        );
-      }
-
-      // 3. Soft policy: estimated-gas ceiling (the hard budget cap is on-chain via agent_wallet).
-      if (opts.policy?.maxGasBudgetMist !== undefined) {
-        const gas = sim.effects.gasUsed as GasUsed;
-        const estGas = BigInt(gas.computationCost) + BigInt(gas.storageCost);
-        if (estGas > opts.policy.maxGasBudgetMist) {
-          throw new Error(
-            `sui_execute_ptb: estimated gas ${estGas.toString()} MIST exceeds policy cap ${opts.policy.maxGasBudgetMist.toString()}.`,
-          );
-        }
-      }
-
-      // 4. Approval gate (headless or human).
-      if (opts.approver) {
-        const ok = await opts.approver({
-          tool: "sui_execute_ptb",
-          args: { unsignedPtb },
-          reason: "sign and submit a Sui PTB",
-        });
-        if (!ok) throw new Error("sui_execute_ptb: rejected by approver.");
-      }
-
-      // 5. Sign + submit (mainnet guard enforced inside the signer).
-      const { digest, effects } = await signer.signAndExecute(tx);
-      return { digest, effects, explorerUrl: explorerTxUrl(signer.network, digest) };
+      return await executeTx(tx, "sui_execute_ptb", { unsignedPtb }, "sign and submit a Sui PTB");
     },
   });
 
-  return { name: "sui", tools: [balance, object, executePtb] };
+  const transfer = defineTool({
+    name: "sui_transfer",
+    description:
+      "Build, sign, and submit a coin transfer: send an amount of SUI (or any coin type) to an " +
+      "address. Amounts are in MIST (1 SUI = 1,000,000,000 MIST). Use this for simple sends.",
+    sensitive: true,
+    parameters: z.object({
+      recipient: z.string().min(1).describe("Destination address (0x…)."),
+      amountMist: z.string().min(1).describe('Amount in MIST. e.g. "1000000000" = 1 SUI.'),
+      coinType: z.string().optional().describe("Coin type (default 0x2::sui::SUI)."),
+    }),
+    execute: async ({ recipient, amountMist, coinType }) => {
+      const signer = signerOrThrow();
+      const amount = BigInt(amountMist);
+      const type = coinType ?? "0x2::sui::SUI";
+      const tx = new Transaction();
+      if (type.endsWith("::sui::SUI")) {
+        // SUI: split straight from the gas coin.
+        const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(amount)]);
+        tx.transferObjects([coin], tx.pure.address(recipient));
+      } else {
+        // Other coins: gather the sender's coins of this type, merge, split the exact amount.
+        const owner = signer.address;
+        if (owner === undefined) throw new Error("sui_transfer: signer has no address.");
+        const { data } = await signer.client.getCoins({ owner, coinType: type });
+        const [first, ...rest] = data;
+        if (!first) throw new Error(`sui_transfer: no ${type} coins owned by ${owner}.`);
+        const primary = tx.object(first.coinObjectId);
+        if (rest.length > 0) {
+          tx.mergeCoins(primary, rest.map((c) => tx.object(c.coinObjectId)));
+        }
+        const [coin] = tx.splitCoins(primary, [tx.pure.u64(amount)]);
+        tx.transferObjects([coin], tx.pure.address(recipient));
+      }
+      return executeTx(
+        tx,
+        "sui_transfer",
+        { recipient, amountMist, coinType: type },
+        `transfer ${amountMist} MIST of ${type} to ${recipient}`,
+      );
+    },
+  });
+
+  const moveCall = defineTool({
+    name: "sui_move_call",
+    description:
+      "Build, sign, and submit ANY Sui Move call — invoke a function on any package/module. This is " +
+      "the general way to run any on-chain action (swaps, mints, staking, arbitrary contracts). " +
+      "Provide the exact target, type arguments, and ordered arguments.",
+    sensitive: true,
+    parameters: z.object({
+      target: z
+        .string()
+        .regex(/^0x[0-9a-fA-F]+::[^:]+::[^:]+$/, "must be package::module::function")
+        .describe("Fully-qualified function, e.g. 0x2::coin::value."),
+      typeArguments: z
+        .array(z.string())
+        .optional()
+        .describe('Generic type args, e.g. ["0x2::sui::SUI"].'),
+      args: z
+        .array(
+          z.object({
+            kind: z.enum(["pure", "object", "gas"]).describe("pure value, object id, or the gas coin"),
+            value: z.string().optional().describe("object: the 0x… id; pure: the value as a string"),
+            type: z
+              .string()
+              .optional()
+              .describe("pure type: u8|u16|u32|u64|u128|u256|bool|address|string (default string)"),
+          }),
+        )
+        .optional()
+        .describe("Ordered arguments to the function."),
+    }),
+    execute: async ({ target, typeArguments, args }) => {
+      const tx = new Transaction();
+      const built = (args ?? []).map((a) => {
+        if (a.kind === "gas") return tx.gas;
+        if (a.kind === "object") {
+          if (a.value === undefined) throw new Error("sui_move_call: object arg needs `value` (id).");
+          return tx.object(a.value);
+        }
+        const v = a.value ?? "";
+        // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check -- default handles the rest
+        switch (a.type) {
+          case "u8": return tx.pure.u8(Number(v));
+          case "u16": return tx.pure.u16(Number(v));
+          case "u32": return tx.pure.u32(Number(v));
+          case "u64": return tx.pure.u64(BigInt(v));
+          case "u128": return tx.pure.u128(BigInt(v));
+          case "u256": return tx.pure.u256(BigInt(v));
+          case "bool": return tx.pure.bool(v === "true");
+          case "address": return tx.pure.address(v);
+          default: return tx.pure.string(v);
+        }
+      });
+      tx.moveCall({ target, typeArguments: typeArguments ?? [], arguments: built });
+      return await executeTx(tx, "sui_move_call", { target, typeArguments, args }, `Move call ${target}`);
+    },
+  });
+
+  return { name: "sui", tools: [balance, object, executePtb, transfer, moveCall] };
 }

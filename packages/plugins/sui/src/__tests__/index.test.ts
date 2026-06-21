@@ -18,9 +18,21 @@ function tool(opts: SuiPluginOptions, name: string): Tool {
 const keyless = () => suiSigner({ network: "testnet" });
 
 describe("suiPlugin", () => {
-  it("exposes sui_balance, sui_object, sui_execute_ptb", () => {
+  it("exposes read, execute, and builder tools", () => {
     const names = suiPlugin({ signer: keyless() }).tools?.map((t) => t.name);
-    expect(names).toEqual(["sui_balance", "sui_object", "sui_execute_ptb"]);
+    expect(names).toEqual([
+      "sui_balance",
+      "sui_object",
+      "sui_execute_ptb",
+      "sui_transfer",
+      "sui_move_call",
+    ]);
+  });
+
+  it("a lazy signer getter that returns null tells the agent to run sui_setup", async () => {
+    await expect(
+      tool({ signer: () => null }, "sui_balance").execute({}, {} as never),
+    ).rejects.toThrow(/sui_setup/);
   });
 
   it("sui_balance errors when there is no address and no key", async () => {
