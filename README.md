@@ -24,12 +24,34 @@ Most agent frameworks are built to _run a product_. Thiny is built for developer
 
 ---
 
+## Install the `thiny` CLI
+
+```bash
+# one-liner — clones, installs, and links `thiny` onto your PATH
+curl -fsSL https://raw.githubusercontent.com/ESES-Labs/thinyai-walrus/main/install.sh | bash
+# or, from a clone:
+git clone https://github.com/ESES-Labs/thinyai-walrus && cd thinyai-walrus && bash install.sh
+```
+
+Then:
+
+```bash
+thiny init     # create ~/.thiny/.env — set THINY_MODEL + an API key
+thiny          # start the agent
+thiny web      # start the HTTP server  (also: thiny daemon, thiny walrus-demo)
+thiny help     # all commands
+```
+
+> `bun add -g` / `pnpm add -g @thiny/cli` will work once published to npm; until then use `install.sh` above.
+
+---
+
 ## Quick start (Web2)
 
 ```bash
-git clone https://github.com/getthiny/thiny && cd thiny
+git clone https://github.com/ESES-Labs/thinyai-walrus && cd thinyai-walrus
 pnpm install && cp .env.example .env   # add THINY_OPENAI_API_KEY
-pnpm cli
+pnpm cli                               # or: thiny  (after install.sh)
 ```
 
 Or scaffold a new project in < 1 minute:
