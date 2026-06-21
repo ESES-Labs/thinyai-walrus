@@ -463,17 +463,26 @@ async function main(): Promise<void> {
       for (const ref of memoryRefs.splice(0))
         renderStored("memory saved", explorerLinks(ref, network), memBackend);
 
-      // Store this turn's action log on Walrus and print its tamper-evident link.
-      if (walrusAudit) {
-        try {
-          const ref = await walrusAudit.flush(currentSessionId);
-          walrusAudit.reset();
-          if (ref) renderStored("memory saved", explorerLinks(ref, network));
-        } catch (err: unknown) {
-          renderWarning(
-            `Walrus audit flush failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+      // Store this turn's action log on Walrus — backgrounded so the prompt returns immediately and
+      // the user can keep chatting; the link surfaces above the prompt once the upload lands.
+      if (walrusAudit && walrusAudit.entries().length > 0) {
+        pendingWrites += 1;
+        const flushP = walrusAudit.flush(currentSessionId); // serialises the buffer synchronously…
+        walrusAudit.reset(); // …so clearing it now can't drop entries from the in-flight upload
+        void flushP
+          .then((ref) => {
+            if (pendingWrites > 0) pendingWrites -= 1;
+            if (ref) deliverRef(ref);
+          })
+          .catch((err: unknown) => {
+            if (pendingWrites > 0) pendingWrites -= 1;
+            const m = `Walrus audit flush failed: ${err instanceof Error ? err.message : String(err)}`;
+            if (atPrompt) {
+              printAbovePrompt(() => {
+                renderWarning(m);
+              });
+            } else renderWarning(m);
+          });
       }
     } catch (err: unknown) {
       spinner.stop();
