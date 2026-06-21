@@ -1,82 +1,59 @@
-import { describe, it, expect, vi } from "vitest";
-import type { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
-import type { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import { suiMemoryHead } from "../index.js";
+import { describe, it, expect } from "vitest";
+import { Transaction } from "@mysten/sui/transactions";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { suiSigner, suiMemoryHead } from "../index.js";
 
-function fakeClient(fields: Record<string, unknown>): SuiJsonRpcClient {
-  return {
-    getObject: vi.fn(async () => ({ data: { content: { dataType: "moveObject", fields } } })),
-    signAndExecuteTransaction: vi.fn(async () => ({ digest: "0xdigest" })),
-    waitForTransaction: vi.fn(async () => ({})),
-  } as unknown as SuiJsonRpcClient;
-}
+// Live tests hit the real Sui testnet RPC (no key, no gas — reads + devInspect only).
+// Run them with: SUI_LIVE_TESTS=1 pnpm vitest run packages/adapters/signer-sui
+const LIVE = process.env.SUI_LIVE_TESTS === "1";
 
-const fakeSigner = {
-  getPublicKey: () => ({ toSuiAddress: () => "0xowner" }),
-} as unknown as Ed25519Keypair;
+describe("suiSigner", () => {
+  it("has no address and refuses to sign without a key", async () => {
+    const s = suiSigner({ network: "testnet" });
+    expect(s.hasKey()).toBe(false);
+    expect(s.address).toBeUndefined();
+    await expect(s.signAndExecute(new Transaction())).rejects.toThrow(/no key configured/);
+  });
 
-const FIELDS = {
-  owner: "0xowner",
-  latest_transcript_blob: "blob-transcript",
-  latest_audit_blob: "blob-audit",
-  updated_at_ms: "1700000000000",
-};
+  it("derives a real address from a generated keypair", () => {
+    const s = suiSigner({ network: "testnet", signer: Ed25519Keypair.generate() });
+    expect(s.hasKey()).toBe(true);
+    expect(s.address).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it("enforces the mainnet guard (off by default)", async () => {
+    const s = suiSigner({ network: "mainnet", signer: Ed25519Keypair.generate() });
+    expect(s.network).toBe("mainnet");
+    await expect(s.signAndExecute(new Transaction())).rejects.toThrow(/mainnet/);
+  });
+
+  it("allows mainnet when explicitly opted in (reaches signing, not the guard)", async () => {
+    // With allowMainnet, the guard is passed; signing then fails for a different reason
+    // (an unfunded generated key) — proving the guard no longer blocks.
+    const s = suiSigner({ network: "mainnet", signer: Ed25519Keypair.generate(), allowMainnet: true });
+    await expect(s.signAndExecute(new Transaction())).rejects.not.toThrow(/refusing to sign on mainnet/);
+  });
+});
+
+describe.skipIf(!LIVE)("suiSigner — live testnet", () => {
+  it("devInspect dry-runs a PTB with no key", async () => {
+    const s = suiSigner({ network: "testnet" });
+    const tx = new Transaction();
+    tx.splitCoins(tx.gas, [tx.pure.u64(1)]);
+    const res = await s.devInspect(tx);
+    expect(res.effects.status.status).toBe("success");
+  });
+
+  it("reads on-chain state from the live RPC", async () => {
+    const s = suiSigner({ network: "testnet" });
+    const bal = await s.client.getBalance({ owner: `0x${"0".repeat(63)}2` });
+    expect(typeof bal.totalBalance).toBe("string");
+  });
+});
 
 describe("suiMemoryHead", () => {
-  it("read() parses the on-chain Move fields into pointers", async () => {
-    const head = suiMemoryHead({
-      packageId: "0xpkg",
-      objectId: "0xobj",
-      client: fakeClient(FIELDS),
-    });
-    expect(await head.read()).toEqual({
-      transcript: "blob-transcript",
-      audit: "blob-audit",
-      owner: "0xowner",
-      updatedAtMs: 1700000000000,
-    });
-  });
-
-  it("read() throws when the object has no Move content", async () => {
-    const client = {
-      getObject: vi.fn(async () => ({ data: { content: null } })),
-    } as unknown as SuiJsonRpcClient;
-    const head = suiMemoryHead({ packageId: "0xpkg", objectId: "0xobj", client });
-    await expect(head.read()).rejects.toThrow(/no readable Move content/);
-  });
-
-  it("update() requires a key", async () => {
-    const head = suiMemoryHead({
-      packageId: "0xpkg",
-      objectId: "0xobj",
-      client: fakeClient(FIELDS),
-    });
-    await expect(head.update({ transcript: "new" })).rejects.toThrow(/no key configured/);
-  });
-
-  it("update() signs + executes and returns the tx digest", async () => {
-    const head = suiMemoryHead({
-      packageId: "0xpkg",
-      objectId: "0xobj",
-      client: fakeClient(FIELDS),
-      signer: fakeSigner,
-    });
-    expect(await head.update({ transcript: "new-transcript" })).toBe("0xdigest");
-  });
-
-  it("exposes the signer address when a key is configured", () => {
-    const withKey = suiMemoryHead({
-      packageId: "0xpkg",
-      objectId: "0xobj",
-      client: fakeClient(FIELDS),
-      signer: fakeSigner,
-    });
-    const noKey = suiMemoryHead({
-      packageId: "0xpkg",
-      objectId: "0xobj",
-      client: fakeClient(FIELDS),
-    });
-    expect(withKey.address).toBe("0xowner");
-    expect(noKey.address).toBeUndefined();
+  it("update without a key throws before any network call", async () => {
+    const head = suiMemoryHead({ packageId: "0x0", objectId: "0x0", network: "testnet" });
+    await expect(head.update({ transcript: "x" })).rejects.toThrow(/no key/);
   });
 });

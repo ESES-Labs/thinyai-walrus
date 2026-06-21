@@ -1,18 +1,106 @@
-import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl, type DevInspectResults } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 
 /**
- * @thiny/signer-sui — a thin client for the on-chain `memory_head` Move object.
+ * @thiny/signer-sui — a reusable Sui signer for Thiny agents.
  *
- * Reads are public (no key); `update` is owner-gated and needs a Sui key. This is the on-chain
- * pointer that replaces a local `pointer.json` — anyone can verify an agent's current brain, and only
- * the owner can rotate it. The Move module lives in `move/memory_head` (publish it, then `create` a
- * shared MemoryHead object — see that package's README).
+ * `suiSigner` holds the agent's keypair and a Sui RPC client, and exposes:
+ *   - `devInspect(tx)`     — dry-run a PTB (keyless; no gas, no signature)
+ *   - `signAndExecute(tx)` — sign + submit a built PTB (mainnet guard, off by default)
+ *
+ * It is the agent's "hand + signature": the keypair here is the `agent` address that an on-chain
+ * `agent_wallet` cap trusts. Hard budget/scope/expiry caps live on-chain (a separate Move package);
+ * this is only the signing mechanism. `suiMemoryHead` (the Walrus on-chain pointer) is built on top.
  *
  * Standalone by design: Thiny's core `Signer` port is EVM-shaped (address/chainId/signAndSend), which
  * doesn't fit Sui's object/PTB model — so this is a focused adapter, not an implementation of it.
  */
+
+export type SuiNetwork = "mainnet" | "testnet";
+
+/** A 32-byte zero address — a valid sender for keyless `devInspect` dry-runs. */
+const ZERO_ADDRESS = `0x${"0".repeat(64)}`;
+
+export interface SuiSignerOptions {
+  /** Sui network (drives the default RPC URL + client config). Default `testnet`. */
+  network?: SuiNetwork;
+  /** Sui fullnode RPC URL. Default: the public fullnode for `network`. */
+  rpcUrl?: string;
+  /** Sui private key (`suiprivkey1…` from `sui keytool export`). Required to sign. */
+  secretKey?: string;
+  /** Pre-built keypair (alternative to `secretKey`; e.g. loaded from a keystore). */
+  signer?: Ed25519Keypair;
+  /** Reuse an existing client instead of constructing one. */
+  client?: SuiJsonRpcClient;
+  /** MAINNET GUARD: must be explicitly `true` to `signAndExecute` on mainnet. Default `false`. */
+  allowMainnet?: boolean;
+}
+
+export interface SuiExecuteResult {
+  /** Transaction digest. */
+  digest: string;
+  /** Transaction effects (status, gas, object changes). */
+  effects: unknown;
+}
+
+export interface SuiSigner {
+  /** The signer's Sui address, or `undefined` if no key is configured (read-only mode). */
+  readonly address: string | undefined;
+  readonly network: SuiNetwork;
+  readonly client: SuiJsonRpcClient;
+  /** Whether a signing key is configured. */
+  hasKey(): boolean;
+  /** Dry-run a PTB — no key, no gas. `sender` defaults to the signer address, else the zero address. */
+  devInspect(tx: Transaction, opts?: { sender?: string }): Promise<DevInspectResults>;
+  /** Sign + submit a built PTB; waits for finality. Throws on mainnet unless `allowMainnet`, or if no key. */
+  signAndExecute(tx: Transaction): Promise<SuiExecuteResult>;
+}
+
+/** Create a reusable Sui signer. */
+export function suiSigner(opts: SuiSignerOptions = {}): SuiSigner {
+  const network: SuiNetwork = opts.network ?? "testnet";
+  const client =
+    opts.client ??
+    new SuiJsonRpcClient({ url: opts.rpcUrl ?? getJsonRpcFullnodeUrl(network), network });
+  const keypair =
+    opts.signer ?? (opts.secretKey ? Ed25519Keypair.fromSecretKey(opts.secretKey) : undefined);
+  const address = keypair?.getPublicKey().toSuiAddress();
+
+  return {
+    address,
+    network,
+    client,
+    hasKey: () => keypair !== undefined,
+
+    devInspect(tx, devOpts) {
+      return client.devInspectTransactionBlock({
+        sender: devOpts?.sender ?? address ?? ZERO_ADDRESS,
+        transactionBlock: tx,
+      });
+    },
+
+    async signAndExecute(tx) {
+      if (!keypair) {
+        throw new Error("suiSigner.signAndExecute: no key configured (pass `secretKey` or `signer`).");
+      }
+      if (network === "mainnet" && opts.allowMainnet !== true) {
+        throw new Error(
+          "suiSigner: refusing to sign on mainnet. Pass `allowMainnet: true` to opt in.",
+        );
+      }
+      const result = await client.signAndExecuteTransaction({
+        signer: keypair,
+        transaction: tx,
+        options: { showEffects: true },
+      });
+      await client.waitForTransaction({ digest: result.digest });
+      return { digest: result.digest, effects: result.effects ?? null };
+    },
+  };
+}
+
+// ── memory-head (Walrus on-chain pointer) — public API unchanged, now built on suiSigner ──
 
 export interface MemoryHeadPointers {
   /** Latest transcript blob ID on Walrus (empty string if never set). */
@@ -43,7 +131,7 @@ export interface SuiMemoryHeadOptions {
   /** The shared `MemoryHead` object id to read/update. */
   objectId: string;
   /** Sui network (drives the default RPC URL + client config). Default `testnet`. */
-  network?: "mainnet" | "testnet";
+  network?: SuiNetwork;
   /** Sui fullnode RPC URL. Default: the public fullnode for `network`. */
   rpcUrl?: string;
   /** Sui private key (`suiprivkey1…` from `sui keytool export`). Required for `update`. */
@@ -64,15 +152,19 @@ interface MemoryHeadFields {
 
 /** Create a client for an on-chain memory-head pointer. */
 export function suiMemoryHead(opts: SuiMemoryHeadOptions): SuiMemoryHead {
-  const network = opts.network ?? "testnet";
-  const client =
-    opts.client ??
-    new SuiJsonRpcClient({ url: opts.rpcUrl ?? getJsonRpcFullnodeUrl(network), network });
-  const signer =
-    opts.signer ?? (opts.secretKey ? Ed25519Keypair.fromSecretKey(opts.secretKey) : undefined);
+  // The memory-head pointer is owner-controlled and intentional; allow mainnet so behavior is
+  // unchanged from before suiSigner existed (its writes aren't gated by the mainnet guard).
+  const signer = suiSigner({
+    network: opts.network,
+    rpcUrl: opts.rpcUrl,
+    secretKey: opts.secretKey,
+    signer: opts.signer,
+    client: opts.client,
+    allowMainnet: true,
+  });
 
   async function read(): Promise<MemoryHeadPointers> {
-    const res = await client.getObject({ id: opts.objectId, options: { showContent: true } });
+    const res = await signer.client.getObject({ id: opts.objectId, options: { showContent: true } });
     const content = res.data?.content;
     if (content?.dataType !== "moveObject") {
       throw new Error(`suiMemoryHead: object ${opts.objectId} has no readable Move content`);
@@ -88,10 +180,10 @@ export function suiMemoryHead(opts: SuiMemoryHeadOptions): SuiMemoryHead {
   }
 
   return {
-    address: signer?.getPublicKey().toSuiAddress(),
+    address: signer.address,
     read,
     async update(pointers) {
-      if (!signer) {
+      if (!signer.hasKey()) {
         throw new Error(
           "suiMemoryHead.update: no key configured. Pass `secretKey` (suiprivkey…) or `signer`.",
         );
@@ -107,12 +199,7 @@ export function suiMemoryHead(opts: SuiMemoryHeadOptions): SuiMemoryHead {
           tx.pure.u64(Date.now()),
         ],
       });
-      const result = await client.signAndExecuteTransaction({
-        signer,
-        transaction: tx,
-        options: { showEffects: true },
-      });
-      await client.waitForTransaction({ digest: result.digest });
+      const result = await signer.signAndExecute(tx);
       return result.digest;
     },
   };
