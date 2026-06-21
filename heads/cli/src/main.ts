@@ -20,7 +20,7 @@ import {
   toolAuditMiddleware,
   budgetMiddleware,
 } from "@thiny/core";
-import { loadThinyConfig, readThinyConfig } from "@thiny/model-aisdk";
+import { loadThinyConfig, readThinyConfig, aiSdkModel } from "@thiny/model-aisdk";
 import { pinoLogger } from "@thiny/logger-pino";
 import { memwalFactsPlugin } from "@thiny/memory-memwal";
 import {
@@ -40,7 +40,7 @@ import { suiSigner, type SuiNetwork, type SuiSigner } from "@thiny/signer-sui";
 import { suiPlugin } from "@thiny/plugin-sui";
 import { mcpHttpPlugin } from "@thiny/mcp";
 import { webSearchPlugin } from "@thiny/plugin-web-search";
-import type { Logger, Plugin, Tool } from "@thiny/core";
+import type { Logger, Plugin, Tool, ModelProvider } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
 import {
   loadConfig,
@@ -49,6 +49,11 @@ import {
   suiWalletsOf,
   activeSuiWallet,
   saveSuiWallet,
+  providersOf,
+  activeProvider,
+  setActiveProvider,
+  saveProvider,
+  type ModelProviderConfig,
 } from "./onboarding.js";
 import { loadSkills } from "./skills.js";
 import {
@@ -186,10 +191,27 @@ export async function runCli(): Promise<void> {
   const session = { inputTokens: 0, outputTokens: 0, toolCalls: 0, turns: 0 };
   const logger = captureStats(fileLogger, turn);
 
-  const activeModelName =
-    process.env.THINY_MODEL ?? process.env.AGENT_MODEL ?? "openai:gpt-4o-mini";
   const personaName = process.env.THINY_PERSONA_NAME ?? "Thiny";
-  const model = loadThinyConfig();
+
+  // Model is built from the active configured provider and held mutably so /connect and /models can
+  // swap it live (no restart). Falls back to env-based config when no providers are set (dev .env).
+  const buildModel = (p: ModelProviderConfig): ModelProvider =>
+    aiSdkModel({
+      model: p.model,
+      openai: { baseURL: p.baseUrl, apiKey: p.apiKey },
+      anthropic: { apiKey: p.apiKey },
+    });
+  const startProvider = activeProvider(loadConfig());
+  let activeModel: ModelProvider = startProvider ? buildModel(startProvider) : loadThinyConfig();
+  let activeModelName =
+    startProvider?.model ?? process.env.THINY_MODEL ?? process.env.AGENT_MODEL ?? "openai:gpt-4o-mini";
+  const model: ModelProvider = {
+    generate: (m, t, s) => activeModel.generate(m, t, s),
+    stream: (m, t, s) => {
+      if (!activeModel.stream) throw new Error("active model has no streaming");
+      return activeModel.stream(m, t, s);
+    },
+  };
 
   // ── Walrus ──────────────────────────────────────────────────────────────────
   // One blob client powers both cross-session memory (default) and the optional audit trail.
@@ -685,6 +707,81 @@ export async function runCli(): Promise<void> {
     } else memoryRefs.push(ref);
   };
 
+  // /connect — switch the active LLM provider (or list them). Swaps the model live.
+  const handleConnect = async (arg: string | undefined): Promise<void> => {
+    const cfg = loadConfig() ?? {};
+    const provs = providersOf(cfg);
+    if (provs.length === 0) {
+      renderInfo("No providers configured — run `thiny init` to add one.");
+      return;
+    }
+    let id = arg;
+    if (!id) {
+      renderInfo("\nProviders:");
+      provs.forEach((pr, i) => {
+        renderInfo(
+          `  ${String(i + 1)}. ${pr.label}  (${pr.model})${pr.id === cfg.activeProviderId ? "  · active" : ""}`,
+        );
+      });
+      const ans = (await rl.question("Switch to (number, blank to cancel): ")).trim();
+      if (!ans) return;
+      const idx = Number(ans) - 1;
+      const chosen = provs[idx];
+      if (!chosen) {
+        renderWarning("Invalid choice.");
+        return;
+      }
+      id = chosen.id;
+    }
+    // accept id, label, or model string
+    const match = provs.find((pr) => pr.id === id || pr.label === id || pr.model === id);
+    const prov = match ? setActiveProvider(cfg, match.id) : undefined;
+    if (!prov) {
+      renderWarning(`No provider "${id}".`);
+      return;
+    }
+    activeModel = buildModel(prov);
+    activeModelName = prov.model;
+    renderInfo(`Connected: ${prov.label} · ${prov.model}`);
+  };
+
+  // /models — change the active provider's model (or show what's configured). Swaps the model live.
+  const handleModels = async (arg: string | undefined): Promise<void> => {
+    const cfg = loadConfig() ?? {};
+    const prov = activeProvider(cfg);
+    if (!prov) {
+      renderInfo("No provider configured — run `thiny init`.");
+      return;
+    }
+    let modelId = arg;
+    if (!modelId) {
+      renderInfo(`\nActive: ${prov.label} · current model: ${prov.model}`);
+      renderInfo("Configured providers:");
+      providersOf(cfg).forEach((pr) => {
+        renderInfo(`  • ${pr.label}: ${pr.model}`);
+      });
+      modelId = (await rl.question("New model id for the active provider (blank to cancel): ")).trim();
+      if (!modelId) return;
+    }
+    prov.model = modelId;
+    saveProvider(cfg, prov, true);
+    activeModel = buildModel(prov);
+    activeModelName = modelId;
+    renderInfo(`Model set: ${modelId}`);
+  };
+
+  // Typing just "/" lists everything the CLI can do.
+  const showSlashMenu = (): void => {
+    renderInfo(
+      "\nCommands: /new · /connect · /models · /tools · /skills · /session · /stats · /verify <blobId> · /clear · /help",
+    );
+    renderInfo(`Tools: ${agent.registry.all().map((t) => t.name).join(", ")}`);
+    const cats = [...defaultRegistry.byCategory()].map(
+      ([cat, defs]) => `${cat}(${defs.map((d) => d.id).join(",")})`,
+    );
+    renderInfo(`Skills: ${cats.join("  ")}\n`);
+  };
+
   try {
   for (;;) {
     // Any write that finished in the gap since the last render → show its link before prompting.
@@ -700,8 +797,19 @@ export async function runCli(): Promise<void> {
     if (trimmed.startsWith("/")) {
       const parts = trimmed.slice(1).split(" ");
       const cmd = parts[0];
+      const arg = parts.slice(1).join(" ").trim() || undefined;
       // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
       switch (cmd) {
+        case "": // bare "/" — show everything the CLI can do
+          showSlashMenu();
+          break;
+        case "connect":
+          await handleConnect(arg);
+          break;
+        case "models":
+        case "model":
+          await handleModels(arg);
+          break;
         case "new": {
           // Long-term memory (facts on Walrus) persists automatically — just rotate the transcript.
           currentSessionId = `cli-${new Date().getTime().toString()}`;
@@ -768,7 +876,8 @@ export async function runCli(): Promise<void> {
           break;
         case "help":
           renderInfo(
-            "\n/new · /tools · /skills · /stats · /session · /verify <blobId> · /clear · /help\n",
+            "\n/new · /connect · /models · /tools · /skills · /stats · /session · /verify <blobId> · /clear · /help\n" +
+              "(type just `/` to see commands + all tools + skills)\n",
           );
           break;
         default:

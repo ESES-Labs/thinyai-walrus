@@ -12,6 +12,11 @@ import * as p from "@clack/prompts";
 export interface ThinyConfig {
   agentName?: string;
   userId?: string;
+  /** Configured LLM providers; switch between them with /connect, change models with /models. */
+  providers?: ModelProviderConfig[];
+  /** id of the provider currently in use. */
+  activeProviderId?: string;
+  // ── legacy single-provider shape (migrated on read) ──
   model?: string;
   baseUrl?: string;
   apiKey?: string;
@@ -27,6 +32,18 @@ export interface ThinyConfig {
     wallet?: { type: string; secretKey: string };
     address?: string;
   };
+}
+
+/** A configured LLM provider + its selected model. */
+export interface ModelProviderConfig {
+  /** Stable id, e.g. "openai", "anthropic", "ollama", or a custom name. */
+  id: string;
+  /** Human label for menus. */
+  label: string;
+  /** Model string passed to the model layer, e.g. "openai:gpt-4o-mini" or a bare id. */
+  model: string;
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 /** A locally-held Sui wallet (agent wallet). */
@@ -66,11 +83,14 @@ export function applyConfig(cfg: ThinyConfig | null): void {
   const set = (k: string, v: string | undefined): void => {
     if (v && !process.env[k]) process.env[k] = v;
   };
-  set("THINY_MODEL", cfg.model);
-  if (cfg.apiKey) {
-    set(cfg.model?.startsWith("anthropic") ? "THINY_ANTHROPIC_API_KEY" : "THINY_OPENAI_API_KEY", cfg.apiKey);
+  const prov = activeProvider(cfg);
+  if (prov) {
+    set("THINY_MODEL", prov.model);
+    if (prov.apiKey) {
+      set(prov.model.startsWith("anthropic") ? "THINY_ANTHROPIC_API_KEY" : "THINY_OPENAI_API_KEY", prov.apiKey);
+    }
+    set("THINY_OPENAI_BASE_URL", prov.baseUrl);
   }
-  set("THINY_OPENAI_BASE_URL", cfg.baseUrl);
   set("THINY_PERSONA_NAME", cfg.agentName);
   set("THINY_USER_ID", cfg.userId);
   if (cfg.sui?.network) {
@@ -121,6 +141,49 @@ export function saveSuiWallet(
   saveConfig(cfg);
 }
 
+/** All configured providers, migrating the legacy single-provider shape transparently. */
+export function providersOf(cfg: ThinyConfig | null): ModelProviderConfig[] {
+  if (!cfg) return [];
+  if (cfg.providers && cfg.providers.length > 0) return cfg.providers;
+  if (cfg.model) {
+    const id = cfg.model.startsWith("anthropic")
+      ? "anthropic"
+      : cfg.baseUrl
+        ? "custom"
+        : "openai";
+    return [{ id, label: cfg.model, model: cfg.model, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl }];
+  }
+  return [];
+}
+
+/** The provider the model layer should use (active, or first). */
+export function activeProvider(cfg: ThinyConfig | null): ModelProviderConfig | undefined {
+  const all = providersOf(cfg);
+  return all.find((x) => x.id === cfg?.activeProviderId) ?? all[0];
+}
+
+/** Add (or replace by id) a provider and persist; optionally make it active. */
+export function saveProvider(cfg: ThinyConfig, provider: ModelProviderConfig, makeActive: boolean): void {
+  const all = providersOf(cfg).filter((x) => x.id !== provider.id);
+  all.push(provider);
+  cfg.providers = all;
+  delete cfg.model; // drop legacy mirror now that we track a list
+  delete cfg.apiKey;
+  delete cfg.baseUrl;
+  if (makeActive || !cfg.activeProviderId) cfg.activeProviderId = provider.id;
+  saveConfig(cfg);
+}
+
+/** Switch the active provider by id; returns the provider or undefined if unknown. */
+export function setActiveProvider(cfg: ThinyConfig, id: string): ModelProviderConfig | undefined {
+  const prov = providersOf(cfg).find((x) => x.id === id);
+  if (!prov) return undefined;
+  cfg.providers = providersOf(cfg); // persist the migrated list too
+  cfg.activeProviderId = id;
+  saveConfig(cfg);
+  return prov;
+}
+
 function bail<T>(v: T | symbol): T {
   if (p.isCancel(v)) {
     p.cancel("Cancelled.");
@@ -160,25 +223,28 @@ export async function baseSetup(): Promise<ThinyConfig> {
   const pick = MODELS.find((m) => m.value === choice);
   if (!pick) throw new Error(`unknown model choice: ${choice}`);
 
-  const cfg: ThinyConfig = { agentName, userId: "default" };
+  const cfg: ThinyConfig = loadConfig() ?? {};
+  cfg.agentName = agentName;
+  cfg.userId ??= "default";
+  let provider: ModelProviderConfig;
   if (pick.custom) {
-    cfg.model = bail(
+    const model = bail(
       await p.text({ message: "Model id", placeholder: "e.g. MiniMax-M3", validate: (v) => (v ? undefined : "Required") }),
     );
-    cfg.baseUrl = bail(
+    const baseUrl = bail(
       await p.text({
         message: "Base URL (OpenAI-compatible)",
         placeholder: "https://api.example.com/v1",
         validate: (v) => (v && /^https?:\/\//.test(v) ? undefined : "Must start with http(s)://"),
       }),
     );
-    cfg.apiKey = bail(await p.password({ message: "API key" }));
+    const apiKey = bail(await p.password({ message: "API key" }));
+    provider = { id: model, label: model, model, baseUrl, apiKey };
   } else {
-    cfg.model = pick.model;
-    if (pick.baseUrl) cfg.baseUrl = pick.baseUrl;
-    cfg.apiKey = pick.apiKey ?? (pick.needsKey ? bail(await p.password({ message: "API key" })) : undefined);
+    const apiKey = pick.apiKey ?? (pick.needsKey ? bail(await p.password({ message: "API key" })) : undefined);
+    provider = { id: pick.value, label: pick.label, model: pick.model ?? "", baseUrl: pick.baseUrl, apiKey };
   }
-  saveConfig(cfg);
+  saveProvider(cfg, provider, true);
   p.outro(`Saved ${CONFIG} — run \`thiny\` to start, or \`thiny sui init\` for Sui.`);
   return cfg;
 }
