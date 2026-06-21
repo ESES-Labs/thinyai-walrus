@@ -19,8 +19,7 @@
     "access": "public",
     "bin": {
       "thiny": "./dist/bin.js"
-    },
-    "provenance": true
+    }
   },
   "scripts": {
     "build": "tsup"
