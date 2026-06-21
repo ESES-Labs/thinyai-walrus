@@ -1,0 +1,56 @@
+{
+  "name": "@thiny/signer-sui",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@thiny/core": "workspace:*",
+    "@mysten/sui": "^2.19.0"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --config ../../tsup.config.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    },
+    "provenance": true
+  },
+  "license": "MIT",
+  "author": "Thiny AI",
+  "description": "Thiny AI — Sui client for the on-chain memory-head pointer (verifiable agent memory)",
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thiny-ai/thiny.git",
+    "directory": "packages/adapters/signer-sui"
+  },
+  "homepage": "https://github.com/thiny-ai/thiny/tree/main/packages/adapters/signer-sui#readme",
+  "bugs": {
+    "url": "https://github.com/thiny-ai/thiny/issues"
+  },
+  "keywords": [
+    "ai-agent",
+    "llm",
+    "thiny",
+    "sui",
+    "walrus",
+    "move",
+    "verifiable",
+    "memory"
+  ]
+}
