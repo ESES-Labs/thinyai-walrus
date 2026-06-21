@@ -40,7 +40,7 @@ import { suiSigner, type SuiNetwork, type SuiSigner } from "@thiny/signer-sui";
 import { suiPlugin } from "@thiny/plugin-sui";
 import { mcpHttpPlugin } from "@thiny/mcp";
 import { webSearchPlugin } from "@thiny/plugin-web-search";
-import type { Logger, Plugin } from "@thiny/core";
+import type { Logger, Plugin, Tool } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
 import { loadConfig, saveConfig, version } from "./onboarding.js";
 import { loadSkills } from "./skills.js";
@@ -356,10 +356,49 @@ export async function runCli(): Promise<void> {
     },
   });
 
-  // Web search is on automatically when a Brave key is present (else the agent uses fetch_url only).
-  const webPlugins: Plugin[] = process.env.BRAVE_API_KEY
-    ? [webSearchPlugin({ apiKey: process.env.BRAVE_API_KEY })]
-    : [];
+  // Web search — distinct from fetch_url (which reads ONE known URL). Exa preferred (get a key at
+  // exa.ai), Brave as fallback. Off if neither key is set.
+  const exaKey = process.env.EXA_API_KEY;
+  const webPlugins: Plugin[] = [];
+  const webTools: Tool[] = [];
+  if (exaKey) {
+    webTools.push(
+      defineTool({
+        name: "web_search",
+        description:
+          "Search the WEB via Exa and get ranked results with text snippets. Use whenever you need " +
+          "current info, prices, docs, or to find a page — anything you don't already know. This is " +
+          "DIFFERENT from fetch_url: web_search finds pages by query; fetch_url reads one URL you have.",
+        parameters: z.object({
+          query: z.string().min(1).describe("The search query."),
+          numResults: z.number().int().positive().optional().describe("Results to return (default 5)."),
+        }),
+        execute: async ({ query, numResults }) => {
+          const res = await fetch("https://api.exa.ai/search", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-api-key": exaKey },
+            body: JSON.stringify({
+              query,
+              numResults: numResults ?? 5,
+              contents: { text: { maxCharacters: 1200 } },
+            }),
+            signal: AbortSignal.timeout(20000),
+          });
+          if (!res.ok) throw new Error(`web_search: Exa HTTP ${String(res.status)} ${await res.text()}`);
+          const data = (await res.json()) as {
+            results?: Array<{ title?: string; url?: string; text?: string }>;
+          };
+          return {
+            query,
+            results: (data.results ?? []).map((r) => ({ title: r.title, url: r.url, text: r.text })),
+          };
+        },
+      }),
+    );
+  } else if (process.env.BRAVE_API_KEY) {
+    webPlugins.push(webSearchPlugin({ apiKey: process.env.BRAVE_API_KEY }));
+  }
+  const webSearchOn = webTools.length > 0 || webPlugins.length > 0;
 
   // Create budget middleware separately so we can reset it per turn.
   // budgetMiddleware counters accumulate across calls — without reset() every
@@ -371,31 +410,34 @@ export async function runCli(): Promise<void> {
     logger: agentLogger,
     persona,
     systemPrompt:
-      "You are a helpful AI assistant. Use tools when they help you answer better. Be concise.\n\n" +
-      "MEMORY: You have persistent long-term memory across sessions, stored on Walrus. What you " +
-      "already know about the user is injected automatically at the start of each conversation under " +
-      "“[User Memory …]”. When the user shares anything durable about themselves — their name, role, " +
-      "preferences, projects, or goals, even casually — immediately call remember_fact to save it. " +
-      "If asked what you remember, answer from the injected user memory (or call recall_memory). " +
-      "You DO remember across sessions — never say you lack memory or that each session starts fresh.\n\n" +
-      "For multi-step work, call update_plan to track steps and delegate_task to hand focused " +
-      "sub-problems to a sub-agent.\n\n" +
-      "LINKS: When the user shares any URL (a skill.md, docs, an API or MCP endpoint, etc.), call " +
-      "fetch_url to read it — never say you can't open links" +
-      (webPlugins.length > 0 ? ". Use web_search to look things up on the web.\n\n" : ".\n\n") +
-      "SUI: You can operate on the Sui blockchain directly with your own tools — do NOT tell the user " +
-      "to install a browser wallet extension. " +
+      `You are ${persona?.name ?? "ThinyAI"}, a capable assistant with real tools. Be concise.\n\n` +
+      "HOW TO ACT: When a request maps to one of your tools, CALL THE TOOL automatically — figure out " +
+      "the right tool yourself; do not ask the user which tool to run, do not ask permission for " +
+      "read-only actions, and never say you can't do something one of your tools covers. Chain tools " +
+      "when needed (e.g. web_search → fetch_url → act).\n\n" +
+      "YOUR TOOLS:\n" +
+      "• Memory — remember_fact, recall_memory: durable memory across sessions (stored on Walrus). " +
+      "Known facts are injected each turn under “[User Memory …]”. Immediately save anything durable " +
+      "the user shares (name, role, preferences, projects, goals). Answer “what do you remember” from " +
+      "it. You DO remember across sessions — never say otherwise.\n" +
+      "• Links — fetch_url: read ANY URL the user shares (a skill.md, docs, JSON, an API/MCP endpoint). " +
+      "Always fetch shared links instead of saying you can't open URLs.\n" +
+      (webSearchOn
+        ? "• Web search — web_search: search the web for anything you don't know (news, prices, docs). " +
+          "web_search FINDS pages by query; fetch_url READS a specific URL — use them together.\n"
+        : "") +
+      "• Planning — update_plan (track multi-step work), delegate_task (hand a focused subtask to a " +
+      "sub-agent).\n" +
+      "• Sui blockchain — you transact yourself; NEVER tell the user to install a browser wallet. " +
       (suiSignerRef
-        ? `A wallet IS configured on ${suiNetwork} at ${suiSignerRef.address ?? "(unknown)"}. `
-        : "No wallet is set up yet — when the user wants Sui, call sui_setup (generate / import / rill) " +
-          "to create or connect one, then tell them to fund the returned address. ") +
-      "Your Sui tools: sui_setup (create/import a wallet), sui_balance and sui_object (read), " +
-      "sui_transfer (send SUI or any coin to an address — amounts in MIST, 1 SUI = 1e9), " +
-      "sui_move_call (call ANY Move function on any package — the general way to run any on-chain " +
-      "action), and sui_execute_ptb (sign a PTB an external builder/Rill produced). Prefer sui_transfer " +
-      "for sends and sui_move_call for contract calls. Always confirm details and remind the user to " +
-      "fund the wallet. Never claim you cannot transact on Sui — you can, via these tools.",
-    tools: [echoTool, suiSetupTool, fetchUrlTool],
+        ? `A wallet IS set up on ${suiNetwork} at ${suiSignerRef.address ?? "?"}. `
+        : "No wallet yet — call sui_setup (generate / import / rill) when the user wants Sui, then have " +
+          "them fund the address. ") +
+      "sui_setup (create/import a wallet), sui_balance & sui_object (read), sui_transfer (send SUI or " +
+      "any coin — amounts in MIST, 1 SUI = 1e9), sui_move_call (call ANY Move function — any on-chain " +
+      "action), sui_execute_ptb (sign a PTB a builder/Rill produced). Prefer sui_transfer for sends and " +
+      "sui_move_call for contract calls; confirm details before signing.",
+    tools: [echoTool, suiSetupTool, fetchUrlTool, ...webTools],
     plugins: [
       {
         name: "observability",
@@ -461,6 +503,9 @@ export async function runCli(): Promise<void> {
       `Sui: ${suiNetwork} · ${suiSignerRef.address ?? "?"}${process.env.MCP_URL ? " · Rill MCP connected" : ""}`,
     );
   else renderInfo("Sui: no wallet — ask the agent to set one up, or run `thiny sui init`");
+  renderInfo(
+    `Web: fetch_url (any URL)${webSearchOn ? ` · web_search (${exaKey ? "Exa" : "Brave"})` : " · web_search off (set EXA_API_KEY)"}`,
+  );
   notifyIfUpdate(thinyDir);
 
   // REPL
