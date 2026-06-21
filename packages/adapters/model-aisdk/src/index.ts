@@ -149,12 +149,13 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
   const maxRetries = opts.maxRetries ?? 2;
 
   return {
-    async generate(messages: Message[], tools: Tool[]): Promise<ModelResponse> {
+    async generate(messages: Message[], tools: Tool[], signal?: AbortSignal): Promise<ModelResponse> {
       const result = await generateText({
         model,
         messages: toCoreMessages(messages),
         ...buildToolOptions(tools),
         maxRetries,
+        abortSignal: signal,
       });
       return {
         text: result.text || undefined,
@@ -170,12 +171,13 @@ export function aiSdkModel(opts: AiSdkOptions): ModelProvider {
       };
     },
 
-    async *stream(messages: Message[], tools: Tool[]): AsyncGenerator<StreamEvent> {
+    async *stream(messages: Message[], tools: Tool[], signal?: AbortSignal): AsyncGenerator<StreamEvent> {
       const result = streamText({
         model,
         messages: toCoreMessages(messages),
         ...buildToolOptions(tools),
         maxRetries,
+        abortSignal: signal,
       });
       for await (const part of result.fullStream) {
         if (part.type === "text-delta") {

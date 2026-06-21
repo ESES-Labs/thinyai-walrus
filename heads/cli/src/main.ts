@@ -7,7 +7,7 @@
  *   THINY_PERSONA_NAME=ThinyAI pnpm cli
  */
 import { createInterface } from "node:readline/promises";
-import { clearLine, cursorTo } from "node:readline";
+import { clearLine, cursorTo, emitKeypressEvents } from "node:readline";
 import { stdin, stdout } from "node:process";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -285,6 +285,7 @@ export async function runCli(): Promise<void> {
 
   // REPL
   const rl = createInterface({ input: stdin, output: stdout });
+  emitKeypressEvents(stdin); // so we can detect Esc to cancel an in-flight turn
   const spinner = new Spinner();
 
   // Memory writes are backgrounded for speed; flush any in-flight write on exit (EOF/Ctrl-D throws
@@ -406,11 +407,18 @@ export async function runCli(): Promise<void> {
     }
 
     renderAgentLabel(personaName);
-    spinner.start("thinking…");
+    spinner.start("thinking…  (esc to cancel)");
 
     budget.reset(); // reset per-turn counters before each run
     resetTurn(turn);
     const startedAt = Date.now();
+
+    // Esc cancels the in-flight turn (aborts the model request).
+    const ac = new AbortController();
+    const onKey = (_s: string, key: { name?: string } | undefined): void => {
+      if (key?.name === "escape") ac.abort();
+    };
+    stdin.on("keypress", onKey);
 
     try {
       let firstToken = true;
@@ -423,19 +431,32 @@ export async function runCli(): Promise<void> {
       };
       agent.events.on("beforeToolCall", toolHandler);
 
-      const reply = await agent.run(trimmed, {
-        sessionId: currentSessionId,
-        onToken: (delta) => {
-          // Stop the spinner on every token, not just the first: it gets restarted after each tool
-          // call, so post-tool tokens would otherwise stream over the live "running…" line and
-          // corrupt the output. stop() is a no-op once already stopped.
+      let reply: string;
+      try {
+        reply = await agent.run(trimmed, {
+          sessionId: currentSessionId,
+          signal: ac.signal,
+          onToken: (delta) => {
+            // Stop the spinner on every token, not just the first: it gets restarted after each tool
+            // call, so post-tool tokens would otherwise stream over the live "running…" line and
+            // corrupt the output. stop() is a no-op once already stopped.
+            spinner.stop();
+            firstToken = false;
+            stream.push(delta);
+          },
+        });
+      } catch (err: unknown) {
+        if (ac.signal.aborted) {
           spinner.stop();
-          firstToken = false;
-          stream.push(delta);
-        },
-      });
+          stream.end();
+          stdout.write("\n  \x1b[2m⊘ cancelled (Esc)\x1b[0m\n");
+          continue; // back to the prompt; nothing persisted for this turn
+        }
+        throw err;
+      } finally {
+        agent.events.off("beforeToolCall", toolHandler);
+      }
 
-      agent.events.off("beforeToolCall", toolHandler);
       spinner.stop();
 
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -497,6 +518,8 @@ export async function runCli(): Promise<void> {
           ? `${msg}\n  ↳ Check your model, base URL, and API key (run \`thiny init\`, or edit ~/.thiny/config.json / .env).`
           : msg,
       );
+    } finally {
+      stdin.off("keypress", onKey); // detach the per-turn Esc listener
     }
   }
   } finally {

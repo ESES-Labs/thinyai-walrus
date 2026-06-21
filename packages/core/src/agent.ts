@@ -95,7 +95,7 @@ export interface Agent {
    */
   run(
     input: string,
-    opts?: { sessionId?: string; onToken?: (delta: string) => void },
+    opts?: { sessionId?: string; onToken?: (delta: string) => void; signal?: AbortSignal },
   ): Promise<string>;
   /** The tool registry for this agent. */
   registry: ToolRegistry;
@@ -152,7 +152,7 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
 
   async function run(
     input: string,
-    opts: { sessionId?: string; onToken?: (delta: string) => void } = {},
+    opts: { sessionId?: string; onToken?: (delta: string) => void; signal?: AbortSignal } = {},
   ): Promise<string> {
     const sessionId = opts.sessionId ?? "default";
     const sessionLogger = logger.child({ sessionId });
@@ -185,9 +185,9 @@ export async function createAgent(config: AgentConfig): Promise<Agent> {
 
     const generate = composeModel(extensions.middleware.model, async (req) => {
       if (opts.onToken && config.model.stream) {
-        return assembleStream(config.model.stream(req.messages, req.tools), opts.onToken);
+        return assembleStream(config.model.stream(req.messages, req.tools, opts.signal), opts.onToken);
       }
-      return config.model.generate(req.messages, req.tools);
+      return config.model.generate(req.messages, req.tools, opts.signal);
     });
 
     const runComposedTool = composeTool(

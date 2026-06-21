@@ -17,7 +17,7 @@ export interface ModelProvider {
    * @param messages - The full conversation history including the current user turn.
    * @param tools    - Tools the model may invoke. Pass an empty array when none are available.
    */
-  generate(messages: Message[], tools: Tool[]): Promise<ModelResponse>;
+  generate(messages: Message[], tools: Tool[], signal?: AbortSignal): Promise<ModelResponse>;
 
   /**
    * Stream the response token-by-token.
@@ -30,7 +30,7 @@ export interface ModelProvider {
    * @param messages - The full conversation history including the current user turn.
    * @param tools    - Tools the model may invoke.
    */
-  stream?(messages: Message[], tools: Tool[]): AsyncIterable<StreamEvent>;
+  stream?(messages: Message[], tools: Tool[], signal?: AbortSignal): AsyncIterable<StreamEvent>;
 }
 
 /**
