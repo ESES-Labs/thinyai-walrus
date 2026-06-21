@@ -35,7 +35,7 @@ const agent = await createAgent({
 |------|-------|------|
 | `sui_balance` | `{ address?, coinType? }` | Read a coin balance (defaults to the agent's address + SUI). |
 | `sui_object` | `{ objectId }` | Read an object's type + fields. |
-| `sui_execute_ptb` | `{ unsignedPtb }` | **Gated executor:** deserialize an externally-built PTB → re-`devInspect` → soft policy → approval gate → sign → submit. |
+| `sui_execute_ptb` | `{ unsignedTx }` | **Gated executor:** deserialize an externally-built PTB → re-`devInspect` → soft policy → approval gate → sign → submit. |
 | `sui_transfer` | `{ recipient, amountMist, coinType? }` | **Builder:** compose + sign + submit a coin transfer (SUI by default). |
 | `sui_move_call` | `{ target, typeArguments?, args? }` | **Builder:** compose + sign + submit ANY Move call — the general way to run any on-chain action. |
 

@@ -44,7 +44,7 @@ describe("suiPlugin", () => {
   it("sui_execute_ptb rejects an unparseable PTB", async () => {
     await expect(
       tool({ signer: keyless() }, "sui_execute_ptb").execute(
-        { unsignedPtb: "@@@ not a ptb @@@" },
+        { unsignedTx: "@@@ not a ptb @@@" },
         {} as never,
       ),
     ).rejects.toThrow();
@@ -71,20 +71,20 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
   it("sui_execute_ptb re-simulates for real, then stops at signing (no key)", async () => {
     const tx = new Transaction();
     tx.splitCoins(tx.gas, [tx.pure.u64(1)]);
-    const ptb = Buffer.from(await tx.toJSON()).toString("base64"); // Transaction.from() accepts this (or base64 BCS from a builder)
+    const ptb = await tx.toJSON(); // Transaction.from() accepts this (or base64 BCS from a builder)
     // Sim passes against live testnet, policy passes, no approver → fails only at the sign step.
     await expect(
-      tool({ signer: keyless() }, "sui_execute_ptb").execute({ unsignedPtb: ptb }, {} as never),
+      tool({ signer: keyless() }, "sui_execute_ptb").execute({ unsignedTx: ptb }, {} as never),
     ).rejects.toThrow(/no key/);
   });
 
   it("sui_execute_ptb enforces the soft gas-budget policy after a real sim", async () => {
     const tx = new Transaction();
     tx.splitCoins(tx.gas, [tx.pure.u64(1)]);
-    const ptb = Buffer.from(await tx.toJSON()).toString("base64");
+    const ptb = await tx.toJSON();
     await expect(
       tool({ signer: keyless(), policy: { maxGasBudgetMist: 1n } }, "sui_execute_ptb").execute(
-        { unsignedPtb: ptb },
+        { unsignedTx: ptb },
         {} as never,
       ),
     ).rejects.toThrow(/exceeds policy cap/);
@@ -93,12 +93,12 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
   it("sui_execute_ptb honors the approval gate after a real sim", async () => {
     const tx = new Transaction();
     tx.splitCoins(tx.gas, [tx.pure.u64(1)]);
-    const ptb = Buffer.from(await tx.toJSON()).toString("base64");
+    const ptb = await tx.toJSON();
     await expect(
       tool(
         { signer: keyless(), approver: () => Promise.resolve(false) },
         "sui_execute_ptb",
-      ).execute({ unsignedPtb: ptb }, {} as never),
+      ).execute({ unsignedTx: ptb }, {} as never),
     ).rejects.toThrow(/rejected by approver/);
   });
 
@@ -106,9 +106,9 @@ describe.skipIf(!LIVE)("suiPlugin — live testnet", () => {
     const tx = new Transaction();
     // A call into a non-existent package → the dry-run does not predict success.
     tx.moveCall({ target: `0x${"0".repeat(63)}9::nope::nope` });
-    const ptb = Buffer.from(await tx.toJSON()).toString("base64");
+    const ptb = await tx.toJSON();
     await expect(
-      tool({ signer: keyless() }, "sui_execute_ptb").execute({ unsignedPtb: ptb }, {} as never),
+      tool({ signer: keyless() }, "sui_execute_ptb").execute({ unsignedTx: ptb }, {} as never),
     ).rejects.toThrow();
   });
 });

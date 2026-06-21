@@ -9,7 +9,7 @@
 import { createInterface } from "node:readline/promises";
 import { clearLine, cursorTo, emitKeypressEvents } from "node:readline";
 import { stdin, stdout } from "node:process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -41,7 +41,7 @@ import { suiPlugin } from "@thiny/plugin-sui";
 import { mcpHttpPlugin } from "@thiny/mcp";
 import type { Logger, Plugin } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
-import { loadConfig, saveConfig } from "./onboarding.js";
+import { loadConfig, saveConfig, version } from "./onboarding.js";
 import { loadSkills } from "./skills.js";
 import {
   clearScreen,
@@ -127,6 +127,39 @@ function parseSkillArgs(): string[] {
 }
 
 let currentSessionId = `cli-${new Date().getTime().toString()}`;
+
+/** True if `latest` is a higher semver than `current` (numeric major.minor.patch). */
+function isNewerVersion(latest: string, current: string): boolean {
+  const a = latest.split(".").map((n) => Number(n) || 0);
+  const b = current.split(".").map((n) => Number(n) || 0);
+  for (let i = 0; i < 3; i++) {
+    if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) > (b[i] ?? 0);
+  }
+  return false;
+}
+
+/**
+ * Print an "update available" line from the cached latest version (instant), and refresh that cache
+ * from npm in the background (non-blocking, fail-silent). First run shows nothing but seeds the cache.
+ */
+function notifyIfUpdate(thinyDir: string): void {
+  const cur = version();
+  const cacheFile = join(thinyDir, "update-check.json");
+  try {
+    const cached = JSON.parse(readFileSync(cacheFile, "utf8")) as { latest?: string };
+    if (cached.latest && isNewerVersion(cached.latest, cur)) {
+      renderInfo(`Update available: ${cur} → ${cached.latest} — run \`thiny update\``);
+    }
+  } catch {
+    /* no cache yet */
+  }
+  void fetch("https://registry.npmjs.org/thinyai/latest")
+    .then((r) => r.json() as Promise<{ version?: string }>)
+    .then((j) => {
+      if (j.version) writeFileSync(cacheFile, JSON.stringify({ latest: j.version, at: Date.now() }));
+    })
+    .catch(() => undefined);
+}
 
 export async function runCli(): Promise<void> {
   // In TUI mode, write all logs to a file so they never appear in the terminal.
@@ -305,14 +338,18 @@ export async function runCli(): Promise<void> {
       "You DO remember across sessions — never say you lack memory or that each session starts fresh.\n\n" +
       "For multi-step work, call update_plan to track steps and delegate_task to hand focused " +
       "sub-problems to a sub-agent.\n\n" +
-      "SUI: You can operate on the Sui blockchain. " +
+      "SUI: You can operate on the Sui blockchain directly with your own tools — do NOT tell the user " +
+      "to install a browser wallet extension. " +
       (suiSignerRef
-        ? `A wallet is configured on ${suiNetwork} at ${suiSignerRef.address ?? "(unknown)"}. `
+        ? `A wallet IS configured on ${suiNetwork} at ${suiSignerRef.address ?? "(unknown)"}. `
         : "No wallet is set up yet — when the user wants Sui, call sui_setup (generate / import / rill) " +
           "to create or connect one, then tell them to fund the returned address. ") +
-      "Use sui_balance to read balances and sui_object to inspect objects. To SEND a transaction you " +
-      "need an UNSIGNED PTB built by a builder (e.g. a connected Rill MCP tool); pass it to " +
-      "sui_execute_ptb, which simulates, applies caps, and signs. Never claim you cannot use Sui — you can.",
+      "Your Sui tools: sui_setup (create/import a wallet), sui_balance and sui_object (read), " +
+      "sui_transfer (send SUI or any coin to an address — amounts in MIST, 1 SUI = 1e9), " +
+      "sui_move_call (call ANY Move function on any package — the general way to run any on-chain " +
+      "action), and sui_execute_ptb (sign a PTB an external builder/Rill produced). Prefer sui_transfer " +
+      "for sends and sui_move_call for contract calls. Always confirm details and remind the user to " +
+      "fund the wallet. Never claim you cannot transact on Sui — you can, via these tools.",
     tools: [echoTool, suiSetupTool],
     plugins: [
       {
@@ -378,6 +415,7 @@ export async function runCli(): Promise<void> {
       `Sui: ${suiNetwork} · ${suiSignerRef.address ?? "?"}${process.env.MCP_URL ? " · Rill MCP connected" : ""}`,
     );
   else renderInfo("Sui: no wallet — ask the agent to set one up, or run `thiny sui init`");
+  notifyIfUpdate(thinyDir);
 
   // REPL
   const rl = createInterface({ input: stdin, output: stdout });

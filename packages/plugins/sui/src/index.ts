@@ -7,7 +7,7 @@ import { Transaction } from "@mysten/sui/transactions";
  * @thiny/plugin-sui — Sui read tools + a gated PTB executor for grounded agent execution.
  *
  * The agent gets unsigned PTBs from a builder (e.g. Rill's hosted MCP, which returns
- * `{ unsignedPtb, preview, simulation }`) and submits them through `sui_execute_ptb`:
+ * `{ unsignedTx, preview, simulation }`) and submits them through `sui_execute_ptb`:
  * re-simulate → soft policy → approval gate → sign → submit.
  *
  * **Protocol-agnostic by design:** it signs whatever bytes it's given — no Cetus/DeepBook SDKs, no
@@ -142,21 +142,22 @@ export function suiPlugin(opts: SuiPluginOptions): Plugin {
   const executePtb = defineTool({
     name: "sui_execute_ptb",
     description:
-      "Sign and submit an unsigned Sui programmable transaction (PTB) that a builder/MCP produced. " +
-      "Re-simulates the PTB, applies the soft policy and approval gate, then signs + submits. " +
-      "Pass the builder's `unsignedPtb` (base64 of the serialized transaction) — built with NO sender " +
-      "and NO gas (the signer fills both). On-chain caps may still abort it.",
+      "Sign and submit an unsigned Sui programmable transaction (PTB) produced by an external " +
+      "builder/MCP (e.g. Rill). Re-simulates → soft policy → approval gate → sign + submit. Pass the " +
+      "builder's `unsignedTx`: the JSON string from `Transaction.toJSON()`, built with NO sender and " +
+      "NO gas (the signer fills both). On-chain caps may still abort it. For your OWN transfers/calls " +
+      "use sui_transfer / sui_move_call instead.",
     sensitive: true,
     parameters: z.object({
-      unsignedPtb: z
+      unsignedTx: z
         .string()
         .min(1)
-        .describe("The builder's unsigned PTB — base64 of a serialized Sui transaction."),
+        .describe("Unsigned PTB — the JSON string from Transaction.toJSON() (no sender, no gas)."),
     }),
-    execute: async ({ unsignedPtb }) => {
-      // Rill sends base64 of the serialized tx; decode → rebuild. The signer adds sender + gas.
-      const tx = Transaction.from(Buffer.from(unsignedPtb, "base64").toString("utf8"));
-      return await executeTx(tx, "sui_execute_ptb", { unsignedPtb }, "sign and submit a Sui PTB");
+    execute: async ({ unsignedTx }) => {
+      // The wire contract is the toJSON() string; the signer adds sender + gas at sign time.
+      const tx = Transaction.from(unsignedTx);
+      return await executeTx(tx, "sui_execute_ptb", { unsignedTx }, "sign and submit a Sui PTB");
     },
   });
 

@@ -57,10 +57,33 @@ async function main(): Promise<void> {
   const [c2] = builder.splitCoins(builder.gas, [builder.pure.u64(1)]);
   builder.transferObjects([c2], builder.pure.address(address));
   const unsignedTx = await builder.toJSON();
-  const exec = suiPlugin({ signer }).tools?.find((t) => t.name === "sui_execute_ptb");
-  if (!exec) throw new Error("sui_execute_ptb tool missing");
-  const out = await exec.execute({ unsignedTx }, {} as never);
-  console.log("4. sui_execute_ptb:", JSON.stringify(out));
+  const tools = suiPlugin({ signer }).tools ?? [];
+  const tool = (name: string) => {
+    const t = tools.find((x) => x.name === name);
+    if (!t) throw new Error(`${name} tool missing`);
+    return t;
+  };
+  const out = await tool("sui_execute_ptb").execute({ unsignedTx }, {} as never);
+  console.log("4. sui_execute_ptb:", (out as { digest: string }).digest);
+
+  // 4b. sui_transfer — the local builder path: 1 MIST self-transfer, built + signed by the plugin.
+  const t = (await tool("sui_transfer").execute(
+    { recipient: address, amountMist: "1" },
+    {} as never,
+  )) as { digest: string };
+  console.log("4b. sui_transfer:", t.digest);
+
+  // 4c. sui_move_call — arbitrary Move call: 0x2::pay::split(gas, 1) splits 1 MIST into a new coin.
+  //     Proves the general builder (gas/pure args + type args) produces a valid, executable PTB.
+  const m = (await tool("sui_move_call").execute(
+    {
+      target: "0x2::pay::split",
+      typeArguments: ["0x2::sui::SUI"],
+      args: [{ kind: "gas" }, { kind: "pure", type: "u64", value: "1" }],
+    },
+    {} as never,
+  )) as { digest: string };
+  console.log("4c. sui_move_call:", m.digest);
 
   // 5. mainnet guard
   const mainnet = suiSigner({ network: "mainnet", secretKey });
