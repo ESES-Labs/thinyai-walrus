@@ -60,14 +60,6 @@ export const BUILTIN_SKILLS: SkillDefinition[] = [
     tags: ["rag", "knowledge", "retrieval"],
   },
   {
-    id: "user-memory",
-    name: "User Memory",
-    description: "Cross-session facts, preferences, session summaries",
-    category: "ai",
-    tags: ["memory", "personalization"],
-    requiredEnv: ["SESSION_DB"],
-  },
-  {
     id: "resilience",
     name: "Resilience",
     description: "retry, timeout, rate-limit, cache, idempotency middleware",

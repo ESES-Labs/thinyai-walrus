@@ -11,12 +11,16 @@
     "@thiny/logger-pino": "workspace:*",
     "@thiny/mcp": "workspace:*",
     "@thiny/memory-sqlite": "workspace:*",
+    "@thiny/memory-memwal": "workspace:*",
     "@thiny/model-aisdk": "workspace:*",
+    "@thiny/plugin-agents": "workspace:*",
     "@thiny/plugin-evm": "workspace:*",
     "@thiny/plugin-solana": "workspace:*",
     "@thiny/plugin-web-search": "workspace:*",
     "@thiny/runtime": "workspace:*",
-    "@thiny/signer-viem": "workspace:*"
+    "@thiny/signer-viem": "workspace:*",
+    "@thiny/signer-sui": "workspace:*",
+    "@thiny/walrus": "workspace:*"
   },
   "devDependencies": {
     "@thiny/core": "workspace:*",
@@ -24,12 +28,16 @@
     "@thiny/logger-pino": "workspace:*",
     "@thiny/mcp": "workspace:*",
     "@thiny/memory-sqlite": "workspace:*",
+    "@thiny/memory-memwal": "workspace:*",
     "@thiny/model-aisdk": "workspace:*",
+    "@thiny/plugin-agents": "workspace:*",
     "@thiny/plugin-evm": "workspace:*",
     "@thiny/plugin-solana": "workspace:*",
     "@thiny/plugin-web-search": "workspace:*",
     "@thiny/runtime": "workspace:*",
-    "@thiny/signer-viem": "workspace:*"
+    "@thiny/signer-viem": "workspace:*",
+    "@thiny/signer-sui": "workspace:*",
+    "@thiny/walrus": "workspace:*"
   },
   "scripts": {
     "build": "tsup src/index.ts --config ../../tsup.config.ts"

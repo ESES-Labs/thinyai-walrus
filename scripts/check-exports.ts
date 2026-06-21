@@ -38,7 +38,6 @@ const PUBLISHABLE_DIRS = [
   "packages/plugins/trading-policy",
   "packages/plugins/resilience",
   "packages/plugins/knowledge",
-  "packages/plugins/user-memory",
   "packages/plugins/agent-skills",
   "heads/cli",
   "apps/create-thiny",

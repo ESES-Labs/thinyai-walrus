@@ -181,13 +181,6 @@ const PACKAGES: PkgMeta[] = [
     keywords: ["ai-agent", "llm", "thiny", "plugin", "knowledge", "rag", "vector-search", "indexing"],
   },
   {
-    name: "@thiny/plugin-user-memory",
-    dir: "packages/plugins/user-memory",
-    description:
-      "Thiny AI — user memory plugin for personalized agent context and preferences",
-    keywords: ["ai-agent", "llm", "thiny", "plugin", "user-memory", "personalization", "context"],
-  },
-  {
     name: "@thiny/plugin-agent-skills",
     dir: "packages/plugins/agent-skills",
     description:

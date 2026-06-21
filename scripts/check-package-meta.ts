@@ -48,10 +48,14 @@ const PUBLISHABLE_DIRS = [
   "packages/adapters/logger-pino",
   "packages/adapters/memory-sqlite",
   "packages/adapters/memory-vec",
+  "packages/adapters/memory-memwal",
+  "packages/adapters/walrus",
   "packages/adapters/signer-viem",
+  "packages/adapters/signer-sui",
   "packages/adapters/mcp",
   "packages/adapters/otel",
   // Plugins
+  "packages/plugins/agents",
   "packages/plugins/evm",
   "packages/plugins/solana",
   "packages/plugins/web-search",
@@ -60,7 +64,6 @@ const PUBLISHABLE_DIRS = [
   "packages/plugins/trading-policy",
   "packages/plugins/resilience",
   "packages/plugins/knowledge",
-  "packages/plugins/user-memory",
   "packages/plugins/agent-skills",
   // Heads (publishable)
   "heads/cli",
