@@ -9,6 +9,9 @@
 import { createInterface } from "node:readline/promises";
 import { clearLine, cursorTo } from "node:readline";
 import { stdin, stdout } from "node:process";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { z } from "zod";
 import {
   createAgent,
@@ -127,9 +130,10 @@ export async function runCli(): Promise<void> {
   // Inspect logs with: tail -f ~/.thiny/cli.log
   // Always write logs to a FILE, never the terminal. (An empty THINY_LOG_FILE must NOT fall through
   // to pino's stdout default — that's what dumped raw JSON into the chat.)
+  const thinyDir = join(homedir(), ".thiny");
+  mkdirSync(thinyDir, { recursive: true }); // ensure the dir exists before pino opens the log file
   const envLogFile = process.env.THINY_LOG_FILE?.trim();
-  const logFile =
-    envLogFile && envLogFile.length > 0 ? envLogFile : `${process.env.HOME ?? "."}/thiny-cli.log`;
+  const logFile = envLogFile && envLogFile.length > 0 ? envLogFile : join(thinyDir, "cli.log");
   const fileLogger = pinoLogger({ level: process.env.LOG_LEVEL ?? "info", file: logFile });
 
   // Capture audit records into per-turn stats (rendered as a status line, not raw logs).
