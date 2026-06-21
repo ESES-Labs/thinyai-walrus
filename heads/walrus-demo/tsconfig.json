@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/adapters/model-aisdk" },
+    { "path": "../../packages/adapters/logger-pino" },
+    { "path": "../../packages/adapters/memory-memwal" },
+    { "path": "../../packages/adapters/walrus" },
+    { "path": "../../packages/adapters/signer-sui" },
+    { "path": "../../packages/runtime" },
+    { "path": "../../packages/eval" }
+  ]
+}

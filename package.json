@@ -16,6 +16,7 @@
     "web": "pnpm --filter @thiny/web dev",
     "create-thiny": "node --import tsx apps/create-thiny/src/index.ts",
     "daemon": "node --env-file=.env --import tsx heads/daemon/src/main.ts",
+    "walrus-demo": "node --env-file=.env --import tsx heads/walrus-demo/src/main.ts",
     "lint": "eslint \"packages/**/*.ts\" \"heads/**/*.ts\" --max-warnings 0",
     "lint:fix": "eslint \"packages/**/*.ts\" \"heads/**/*.ts\" --fix",
     "format": "prettier --write .",
