@@ -42,7 +42,14 @@ import { mcpHttpPlugin } from "@thiny/mcp";
 import { webSearchPlugin } from "@thiny/plugin-web-search";
 import type { Logger, Plugin, Tool } from "@thiny/core";
 import { defaultRegistry } from "@thiny/skills";
-import { loadConfig, saveConfig, version } from "./onboarding.js";
+import {
+  loadConfig,
+  saveConfig,
+  version,
+  suiWalletsOf,
+  activeSuiWallet,
+  saveSuiWallet,
+} from "./onboarding.js";
 import { loadSkills } from "./skills.js";
 import {
   clearScreen,
@@ -320,6 +327,142 @@ export async function runCli(): Promise<void> {
     },
   });
 
+  // ── Wallet management — the agent knows and manages every wallet ───────────────
+  const activateSigner = (secretKey: string): void => {
+    suiSignerRef = suiSigner({ network: suiNetwork, secretKey, allowMainnet });
+  };
+
+  const suiWalletsTool = defineTool({
+    name: "sui_wallets",
+    description:
+      "List every Sui wallet the user has: the local agent wallets (with addresses) and the Rill MCP " +
+      "signer if connected. Use to answer 'what wallets/addresses do I have', or to pick one. Does " +
+      "NOT reveal private keys (use sui_export_wallet for that).",
+    parameters: z.object({}),
+    execute: () => {
+      const cfg = loadConfig();
+      const active = activeSuiWallet(cfg)?.address;
+      return {
+        network: cfg?.sui?.network ?? suiNetwork,
+        activeAddress: active,
+        agentWallets: suiWalletsOf(cfg).map((w) => ({
+          label: w.label,
+          address: w.address,
+          source: w.source,
+          active: w.address === active,
+        })),
+        rill: cfg?.sui?.rillMcpUrl ? { source: "rill", mcpUrl: cfg.sui.rillMcpUrl } : null,
+      };
+    },
+  });
+
+  const suiCreateWalletTool = defineTool({
+    name: "sui_create_wallet",
+    description:
+      "Generate a NEW Sui agent wallet (key pair) locally and save it. Returns the new address — " +
+      "remind the user to fund it. Use when the user asks for a new/another wallet or address.",
+    sensitive: true,
+    parameters: z.object({
+      label: z.string().optional().describe("A name for the wallet (default: wallet-N)."),
+      activate: z.boolean().optional().describe("Make it the active signing wallet (default true)."),
+    }),
+    execute: async ({ label, activate }) => {
+      const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+      const kp = Ed25519Keypair.generate();
+      const address = kp.getPublicKey().toSuiAddress();
+      const cfg = loadConfig() ?? {};
+      const makeActive = activate ?? true;
+      const n = suiWalletsOf(cfg).length + 1;
+      saveSuiWallet(
+        cfg,
+        suiNetwork,
+        { label: label ?? `wallet-${String(n)}`, address, secretKey: kp.getSecretKey(), source: "generated" },
+        makeActive,
+      );
+      if (makeActive) activateSigner(kp.getSecretKey());
+      return {
+        address,
+        active: makeActive,
+        note: `New wallet on ${suiNetwork}. Fund ${address} before transacting${suiNetwork === "testnet" ? " (faucet: https://faucet.sui.io)" : ""}.`,
+      };
+    },
+  });
+
+  const suiImportWalletTool = defineTool({
+    name: "sui_import_wallet",
+    description:
+      "Import an existing Sui wallet from its private key (suiprivkey…) and save it. Use when the user " +
+      "wants to add/restore a wallet they already have.",
+    sensitive: true,
+    parameters: z.object({
+      secretKey: z.string().min(1).describe("The private key, a suiprivkey… string."),
+      label: z.string().optional().describe("A name for the wallet."),
+      activate: z.boolean().optional().describe("Make it the active signing wallet (default true)."),
+    }),
+    execute: async ({ secretKey, label, activate }) => {
+      if (!secretKey.startsWith("suiprivkey")) {
+        throw new Error("sui_import_wallet: expected a private key starting with suiprivkey…");
+      }
+      const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
+      const address = Ed25519Keypair.fromSecretKey(secretKey).getPublicKey().toSuiAddress();
+      const cfg = loadConfig() ?? {};
+      const makeActive = activate ?? true;
+      saveSuiWallet(
+        cfg,
+        suiNetwork,
+        { label: label ?? "imported", address, secretKey, source: "imported" },
+        makeActive,
+      );
+      if (makeActive) activateSigner(secretKey);
+      return { address, active: makeActive, note: `Imported wallet ${address} on ${suiNetwork}.` };
+    },
+  });
+
+  const suiExportWalletTool = defineTool({
+    name: "sui_export_wallet",
+    description:
+      "Reveal the PRIVATE KEY of a saved wallet so the user can back it up or move it elsewhere. " +
+      "Defaults to the active wallet. SENSITIVE — only when the user explicitly asks to export/back up.",
+    sensitive: true,
+    parameters: z.object({
+      address: z.string().optional().describe("Which wallet to export (default: the active one)."),
+    }),
+    execute: ({ address }) => {
+      const cfg = loadConfig();
+      const all = suiWalletsOf(cfg);
+      const w = address ? all.find((x) => x.address === address) : activeSuiWallet(cfg);
+      if (!w) throw new Error("sui_export_wallet: no matching wallet found.");
+      return {
+        address: w.address,
+        secretKey: w.secretKey,
+        warning: "Keep this private key secret — anyone who has it controls the wallet.",
+      };
+    },
+  });
+
+  const suiUseWalletTool = defineTool({
+    name: "sui_use_wallet",
+    description: "Switch the active signing wallet to a saved one by address. Use to send from a different wallet.",
+    parameters: z.object({ address: z.string().min(1).describe("Address of the wallet to make active.") }),
+    execute: ({ address }) => {
+      const cfg = loadConfig();
+      const w = suiWalletsOf(cfg).find((x) => x.address === address);
+      if (!w || !cfg?.sui) throw new Error(`sui_use_wallet: no saved wallet ${address}.`);
+      cfg.sui.activeAddress = address;
+      saveConfig(cfg);
+      activateSigner(w.secretKey);
+      return { activeAddress: address, note: `Now signing as ${address}.` };
+    },
+  });
+
+  const walletTools: Tool[] = [
+    suiWalletsTool,
+    suiCreateWalletTool,
+    suiImportWalletTool,
+    suiExportWalletTool,
+    suiUseWalletTool,
+  ];
+
   // Fetch any URL the user shares (skill.md, docs, JSON, an API/MCP endpoint, …) so the agent can
   // actually read it instead of saying it can't open links.
   // ponytail: a local CLI runs with the user's own network access — no SSRF allowlist; add one if
@@ -430,14 +573,17 @@ export async function runCli(): Promise<void> {
       "sub-agent).\n" +
       "• Sui blockchain — you transact yourself; NEVER tell the user to install a browser wallet. " +
       (suiSignerRef
-        ? `A wallet IS set up on ${suiNetwork} at ${suiSignerRef.address ?? "?"}. `
-        : "No wallet yet — call sui_setup (generate / import / rill) when the user wants Sui, then have " +
-          "them fund the address. ") +
-      "sui_setup (create/import a wallet), sui_balance & sui_object (read), sui_transfer (send SUI or " +
-      "any coin — amounts in MIST, 1 SUI = 1e9), sui_move_call (call ANY Move function — any on-chain " +
-      "action), sui_execute_ptb (sign a PTB a builder/Rill produced). Prefer sui_transfer for sends and " +
-      "sui_move_call for contract calls; confirm details before signing.",
-    tools: [echoTool, suiSetupTool, fetchUrlTool, ...webTools],
+        ? `The active wallet is on ${suiNetwork} at ${suiSignerRef.address ?? "?"}. `
+        : "No wallet yet — call sui_create_wallet (or sui_import_wallet) when the user wants Sui, then " +
+          "have them fund the address. ") +
+      "Wallets: sui_wallets (list ALL the user's wallets + addresses — use this to answer 'what's my " +
+      "address / what wallets do I have'), sui_create_wallet (new key pair), sui_import_wallet " +
+      "(restore from a suiprivkey), sui_export_wallet (reveal a private key — only when asked), " +
+      "sui_use_wallet (switch the active wallet). " +
+      "On-chain: sui_balance & sui_object (read), sui_transfer (send SUI/any coin — amounts in MIST, " +
+      "1 SUI = 1e9), sui_move_call (call ANY Move function), sui_execute_ptb (sign a builder/Rill PTB). " +
+      "Prefer sui_transfer for sends and sui_move_call for contract calls; confirm details before signing.",
+    tools: [echoTool, suiSetupTool, ...walletTools, fetchUrlTool, ...webTools],
     plugins: [
       {
         name: "observability",

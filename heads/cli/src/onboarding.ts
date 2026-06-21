@@ -17,10 +17,24 @@ export interface ThinyConfig {
   apiKey?: string;
   sui?: {
     network: string;
-    wallet: { type: string; secretKey: string };
-    address: string;
+    /** All known agent wallets (local keys). */
+    wallets?: SuiWallet[];
+    /** Address of the wallet the signer currently uses. */
+    activeAddress?: string;
+    /** Rill MCP signer URL (keyless builder; its wallet is managed by Rill). */
     rillMcpUrl?: string;
+    // ── legacy single-wallet shape (pre-multi-wallet) — migrated on read ──
+    wallet?: { type: string; secretKey: string };
+    address?: string;
   };
+}
+
+/** A locally-held Sui wallet (agent wallet). */
+export interface SuiWallet {
+  label: string;
+  address: string;
+  secretKey: string;
+  source: string; // "generated" | "imported"
 }
 
 const THINY_DIR = join(homedir(), ".thiny");
@@ -63,12 +77,48 @@ export function applyConfig(cfg: ThinyConfig | null): void {
     set("SUI_NETWORK", cfg.sui.network);
     if (cfg.sui.network === "mainnet") set("SUI_ALLOW_MAINNET", "1");
   }
-  const sk = cfg.sui?.wallet.secretKey;
-  if (sk) {
-    set("SUI_SECRET_KEY", sk);
-    set("THINY_SUI_SECRET_KEY", sk);
+  const active = activeSuiWallet(cfg);
+  if (active) {
+    set("SUI_SECRET_KEY", active.secretKey);
+    set("THINY_SUI_SECRET_KEY", active.secretKey);
   }
   set("MCP_URL", cfg.sui?.rillMcpUrl);
+}
+
+/** All agent wallets, migrating the legacy single-wallet shape transparently. */
+export function suiWalletsOf(cfg: ThinyConfig | null): SuiWallet[] {
+  const s = cfg?.sui;
+  if (!s) return [];
+  if (s.wallets && s.wallets.length > 0) return s.wallets;
+  if (s.wallet && s.address) {
+    return [{ label: "default", address: s.address, secretKey: s.wallet.secretKey, source: s.wallet.type }];
+  }
+  return [];
+}
+
+/** The wallet the signer should use (the active one, or the first). */
+export function activeSuiWallet(cfg: ThinyConfig | null): SuiWallet | undefined {
+  const all = suiWalletsOf(cfg);
+  const active = cfg?.sui?.activeAddress ?? cfg?.sui?.address;
+  return all.find((w) => w.address === active) ?? all[0];
+}
+
+/** Add (or replace by address) an agent wallet and persist; optionally make it active. */
+export function saveSuiWallet(
+  cfg: ThinyConfig,
+  network: string,
+  wallet: SuiWallet,
+  makeActive: boolean,
+): void {
+  cfg.sui ??= { network };
+  cfg.sui.network = network;
+  const all = suiWalletsOf(cfg).filter((w) => w.address !== wallet.address);
+  all.push(wallet);
+  cfg.sui.wallets = all;
+  delete cfg.sui.wallet; // drop legacy mirror now that we track a list
+  delete cfg.sui.address;
+  if (makeActive || !cfg.sui.activeAddress) cfg.sui.activeAddress = wallet.address;
+  saveConfig(cfg);
 }
 
 function bail<T>(v: T | symbol): T {
@@ -107,7 +157,8 @@ export async function baseSetup(): Promise<ThinyConfig> {
   const choice = bail(
     await p.select({ message: "Pick a model", options: MODELS.map(({ value, label, hint }) => ({ value, label, hint })) }),
   );
-  const pick = MODELS.find((m) => m.value === choice) ?? MODELS[0];
+  const pick = MODELS.find((m) => m.value === choice);
+  if (!pick) throw new Error(`unknown model choice: ${choice}`);
 
   const cfg: ThinyConfig = { agentName, userId: "default" };
   if (pick.custom) {
@@ -118,7 +169,7 @@ export async function baseSetup(): Promise<ThinyConfig> {
       await p.text({
         message: "Base URL (OpenAI-compatible)",
         placeholder: "https://api.example.com/v1",
-        validate: (v) => (/^https?:\/\//.test(v) ? undefined : "Must start with http(s)://"),
+        validate: (v) => (v && /^https?:\/\//.test(v) ? undefined : "Must start with http(s)://"),
       }),
     );
     cfg.apiKey = bail(await p.password({ message: "API key" }));
@@ -168,21 +219,23 @@ export async function suiInit(): Promise<void> {
     const sk = bail(
       await p.password({
         message: "Private key (suiprivkey…)",
-        validate: (v) => (v.startsWith("suiprivkey") ? undefined : "Expected a suiprivkey… string"),
+        validate: (v) => (v?.startsWith("suiprivkey") ? undefined : "Expected a suiprivkey… string"),
       }),
     );
     wallet = { type: "imported", secretKey: sk };
     address = Ed25519Keypair.fromSecretKey(sk).getPublicKey().toSuiAddress();
   }
 
-  cfg.sui = { network, wallet, address };
+  saveSuiWallet(cfg, network, { label: choice, address, secretKey: wallet.secretKey, source: wallet.type }, true);
   if (choice === "rill") {
     const url = bail(
       await p.text({ message: "Rill MCP URL", placeholder: "leave blank to add later", defaultValue: "" }),
     );
-    if (url) cfg.sui.rillMcpUrl = url;
+    if (url && cfg.sui) {
+      cfg.sui.rillMcpUrl = url;
+      saveConfig(cfg);
+    }
   }
-  saveConfig(cfg);
 
   const faucet = network === "testnet" ? "\nFaucet: https://faucet.sui.io  (or `sui client faucet`)" : "";
   p.note(`${address}${faucet}`, `⚠ Fund this address (${network}) before sending transactions`);
