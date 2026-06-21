@@ -43,5 +43,5 @@ esac
 
 echo ""
 echo "Done. Next:"
-echo "  thiny init     # create ~/.thiny/.env"
-echo "  thiny          # start the agent"
+echo "  thiny            # start the agent (first run walks you through setup)"
+echo "  thiny sui init   # optional: add Sui capabilities"

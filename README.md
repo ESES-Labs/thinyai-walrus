@@ -33,14 +33,17 @@ curl -fsSL https://raw.githubusercontent.com/ESES-Labs/thinyai-walrus/main/insta
 git clone https://github.com/ESES-Labs/thinyai-walrus && cd thinyai-walrus && bash install.sh
 ```
 
-Then:
+Then just run it — first launch walks you through setup (model + agent name), no `.env` to edit:
 
 ```bash
-thiny init     # create ~/.thiny/.env — set THINY_MODEL + an API key
-thiny          # start the agent
-thiny web      # start the HTTP server  (also: thiny daemon, thiny walrus-demo)
-thiny help     # all commands
+thiny            # start the agent (runs first-time setup if needed)
+thiny sui init   # add Sui capabilities: network + wallet (paste / generate / Rill agent wallet)
+thiny web        # start the HTTP server  (also: thiny daemon, thiny walrus-demo)
+thiny help       # all commands
 ```
+
+Config lives in `~/.thiny/config.json` (chmod `0600` — it holds your API key and Sui key). After
+`thiny sui init`, **fund the printed address** before sending transactions.
 
 > `bun add -g` / `pnpm add -g @thiny/cli` will work once published to npm; until then use `install.sh` above.
 
