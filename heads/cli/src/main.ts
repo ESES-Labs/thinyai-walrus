@@ -55,6 +55,7 @@ import {
   type ModelProviderConfig,
 } from "./onboarding.js";
 import { loadSkills } from "./skills.js";
+import { createFetchUrlTool } from "./tools/fetch-url.js";
 import {
   clearScreen,
   renderHeader,
@@ -148,8 +149,12 @@ let currentSessionId = `cli-${new Date().getTime().toString()}`;
  */
 function forcedToolFor(input: string): ToolChoice | undefined {
   const s = input.toLowerCase();
-  if (/\bbalance(s)?\b/.test(s) || /\bhow much .*(sui|coin|token)/.test(s)) return { tool: "sui_balances" };
-  if (/\b(what|show|list)\b.*\b(address|addresses|wallet|wallets)\b/.test(s) || /\bmy (address|wallet)/.test(s)) {
+  if (/\bbalance(s)?\b/.test(s) || /\bhow much .*(sui|coin|token)/.test(s))
+    return { tool: "sui_balances" };
+  if (
+    /\b(what|show|list)\b.*\b(address|addresses|wallet|wallets)\b/.test(s) ||
+    /\bmy (address|wallet)/.test(s)
+  ) {
     return { tool: "sui_wallets" };
   }
   return undefined;
@@ -196,7 +201,8 @@ function notifyIfUpdate(thinyDir: string): void {
   void fetch("https://registry.npmjs.org/thinyai/latest")
     .then((r) => r.json() as Promise<{ version?: string }>)
     .then((j) => {
-      if (j.version) writeFileSync(cacheFile, JSON.stringify({ latest: j.version, at: Date.now() }));
+      if (j.version)
+        writeFileSync(cacheFile, JSON.stringify({ latest: j.version, at: Date.now() }));
     })
     .catch(() => undefined);
 }
@@ -231,7 +237,10 @@ export async function runCli(): Promise<void> {
   const startProvider = activeProvider(loadConfig());
   let activeModel: ModelProvider = startProvider ? buildModel(startProvider) : loadThinyConfig();
   let activeModelName =
-    startProvider?.model ?? process.env.THINY_MODEL ?? process.env.AGENT_MODEL ?? "openai:gpt-4o-mini";
+    startProvider?.model ??
+    process.env.THINY_MODEL ??
+    process.env.AGENT_MODEL ??
+    "openai:gpt-4o-mini";
   const model: ModelProvider = {
     generate: (m, t, s, tc) => activeModel.generate(m, t, s, tc),
     stream: (m, t, s, tc) => {
@@ -277,7 +286,9 @@ export async function runCli(): Promise<void> {
         client: walrus,
         // Stable per-user location (~/.thiny) so cross-session memory works no matter which
         // directory `thiny` is launched from — a cwd-relative file would fragment per folder.
-        pointers: filePointerStore(process.env.WALRUS_POINTERS ?? join(thinyDir, "thiny-pointers.json")),
+        pointers: filePointerStore(
+          process.env.WALRUS_POINTERS ?? join(thinyDir, "thiny-pointers.json"),
+        ),
         userId,
         // Instant, reliable local mirror — cross-session memory no longer waits on the slow Walrus PUT.
         cacheFile: join(thinyDir, `memory-${userId}.json`),
@@ -372,7 +383,9 @@ export async function runCli(): Promise<void> {
         note:
           `Sui wallet ready on ${network} at ${address}. The user MUST fund this address before sending transactions` +
           (network === "testnet" ? " (faucet: https://faucet.sui.io)." : ".") +
-          (wallet === "rill" ? " Rill MCP URL saved — restart thiny to connect its builder tools." : ""),
+          (wallet === "rill"
+            ? " Rill MCP URL saved — restart thiny to connect its builder tools."
+            : ""),
       };
     },
   });
@@ -415,7 +428,10 @@ export async function runCli(): Promise<void> {
     sensitive: true,
     parameters: z.object({
       label: z.string().optional().describe("A name for the wallet (default: wallet-N)."),
-      activate: z.boolean().optional().describe("Make it the active signing wallet (default true)."),
+      activate: z
+        .boolean()
+        .optional()
+        .describe("Make it the active signing wallet (default true)."),
     }),
     execute: async ({ label, activate }) => {
       const { Ed25519Keypair } = await import("@mysten/sui/keypairs/ed25519");
@@ -427,7 +443,12 @@ export async function runCli(): Promise<void> {
       saveSuiWallet(
         cfg,
         suiNetwork,
-        { label: label ?? `wallet-${String(n)}`, address, secretKey: kp.getSecretKey(), source: "generated" },
+        {
+          label: label ?? `wallet-${String(n)}`,
+          address,
+          secretKey: kp.getSecretKey(),
+          source: "generated",
+        },
         makeActive,
       );
       if (makeActive) activateSigner(kp.getSecretKey());
@@ -448,7 +469,10 @@ export async function runCli(): Promise<void> {
     parameters: z.object({
       secretKey: z.string().min(1).describe("The private key, a suiprivkey… string."),
       label: z.string().optional().describe("A name for the wallet."),
-      activate: z.boolean().optional().describe("Make it the active signing wallet (default true)."),
+      activate: z
+        .boolean()
+        .optional()
+        .describe("Make it the active signing wallet (default true)."),
     }),
     execute: async ({ secretKey, label, activate }) => {
       if (!secretKey.startsWith("suiprivkey")) {
@@ -493,8 +517,11 @@ export async function runCli(): Promise<void> {
 
   const suiUseWalletTool = defineTool({
     name: "sui_use_wallet",
-    description: "Switch the active signing wallet to a saved one by address. Use to send from a different wallet.",
-    parameters: z.object({ address: z.string().min(1).describe("Address of the wallet to make active.") }),
+    description:
+      "Switch the active signing wallet to a saved one by address. Use to send from a different wallet.",
+    parameters: z.object({
+      address: z.string().min(1).describe("Address of the wallet to make active."),
+    }),
     execute: ({ address }) => {
       const cfg = loadConfig();
       const w = suiWalletsOf(cfg).find((x) => x.address === address);
@@ -513,13 +540,21 @@ export async function runCli(): Promise<void> {
       "my balance / what coins do I have'. Returns each address with its coins. SUI amounts are also " +
       "given in whole SUI (1 SUI = 1e9 MIST).",
     parameters: z.object({
-      network: z.enum(["testnet", "mainnet"]).optional().describe("Network (default: the active one)."),
-      address: z.string().optional().describe("Limit to one address (default: all the user's wallets)."),
+      network: z
+        .enum(["testnet", "mainnet"])
+        .optional()
+        .describe("Network (default: the active one)."),
+      address: z
+        .string()
+        .optional()
+        .describe("Limit to one address (default: all the user's wallets)."),
     }),
     execute: async ({ network, address }) => {
       const net = network ?? suiNetwork;
       const client =
-        net === suiNetwork && suiSignerRef ? suiSignerRef.client : suiSigner({ network: net }).client;
+        net === suiNetwork && suiSignerRef
+          ? suiSignerRef.client
+          : suiSigner({ network: net }).client;
       const walletAddrs = suiWalletsOf(loadConfig()).map((w) => w.address);
       // Include the active signer's address even if it came from an env key (not the config list).
       if (suiSignerRef?.address && !walletAddrs.includes(suiSignerRef.address)) {
@@ -565,41 +600,9 @@ export async function runCli(): Promise<void> {
     suiBalancesTool,
   ];
 
-  // Fetch any URL the user shares (skill.md, docs, JSON, an API/MCP endpoint, …) so the agent can
-  // actually read it instead of saying it can't open links.
-  // ponytail: a local CLI runs with the user's own network access — no SSRF allowlist; add one if
-  // this ever runs as a hosted/multi-tenant service.
-  const fetchUrlTool = defineTool({
-    name: "fetch_url",
-    description:
-      "Fetch the contents of an http(s) URL (markdown, text, JSON, HTML). ALWAYS use this when the " +
-      "user shares a link — e.g. a skill.md, docs page, or an API/MCP endpoint — instead of saying " +
-      "you can't open URLs. Returns the response text (truncated if very large).",
-    parameters: z.object({
-      url: z.string().url().describe("The http(s) URL to fetch."),
-      maxChars: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Max characters of body to return (default 20000)."),
-    }),
-    execute: async ({ url, maxChars }) => {
-      const limit = maxChars ?? 20000;
-      const res = await fetch(url, {
-        headers: { "user-agent": "thiny-cli", accept: "*/*" },
-        signal: AbortSignal.timeout(15000),
-      });
-      const body = await res.text();
-      return {
-        url,
-        status: res.status,
-        contentType: res.headers.get("content-type") ?? "",
-        truncated: body.length > limit,
-        content: body.slice(0, limit),
-      };
-    },
-  });
+  // fetch_url — GET (read a page) or POST/PUT/PATCH/DELETE (call a REST endpoint).
+  // Extracted to `src/tools/fetch-url.ts` so it's unit-testable.
+  const fetchUrlTool = createFetchUrlTool();
 
   // Web search — distinct from fetch_url (which reads ONE known URL). Exa preferred (get a key at
   // exa.ai), Brave as fallback. Off if neither key is set.
@@ -616,7 +619,12 @@ export async function runCli(): Promise<void> {
           "DIFFERENT from fetch_url: web_search finds pages by query; fetch_url reads one URL you have.",
         parameters: z.object({
           query: z.string().min(1).describe("The search query."),
-          numResults: z.number().int().positive().optional().describe("Results to return (default 5)."),
+          numResults: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Results to return (default 5)."),
         }),
         execute: async ({ query, numResults }) => {
           const res = await fetch("https://api.exa.ai/search", {
@@ -629,13 +637,18 @@ export async function runCli(): Promise<void> {
             }),
             signal: AbortSignal.timeout(20000),
           });
-          if (!res.ok) throw new Error(`web_search: Exa HTTP ${String(res.status)} ${await res.text()}`);
+          if (!res.ok)
+            throw new Error(`web_search: Exa HTTP ${String(res.status)} ${await res.text()}`);
           const data = (await res.json()) as {
             results?: Array<{ title?: string; url?: string; text?: string }>;
           };
           return {
             query,
-            results: (data.results ?? []).map((r) => ({ title: r.title, url: r.url, text: r.text })),
+            results: (data.results ?? []).map((r) => ({
+              title: r.title,
+              url: r.url,
+              text: r.text,
+            })),
           };
         },
       }),
@@ -667,8 +680,10 @@ export async function runCli(): Promise<void> {
       "“[User Memory …]”, so answer “what do you remember / what's my name” directly from that context " +
       "— do NOT call recall_memory unless the injected memory is empty and you truly need to re-check. " +
       "You DO remember across sessions; never say otherwise.\n" +
-      "• Links — fetch_url: read ANY URL the user shares (a skill.md, docs, JSON, an API/MCP endpoint). " +
-      "Always fetch shared links instead of saying you can't open URLs.\n" +
+      "• Links & REST — fetch_url: read ANY URL the user shares (a skill.md, docs, JSON, an API/MCP endpoint). " +
+      "Always fetch shared links instead of saying you can't open URLs. " +
+      "For REST endpoints that need POST/PUT/PATCH, set `method` and pass `body` (JSON string) + `headers` — " +
+      "do NOT use delegate_task just to make an HTTP call.\n" +
       (webSearchOn
         ? "• Web search — web_search: search the web for anything you don't know (news, prices, docs). " +
           "web_search FINDS pages by query; fetch_url READS a specific URL — use them together.\n"
@@ -761,7 +776,7 @@ export async function runCli(): Promise<void> {
     );
   else renderInfo("Sui: no wallet — ask the agent to set one up, or run `thiny sui init`");
   renderInfo(
-    `Web: fetch_url (any URL)${webSearchOn ? ` · web_search (${exaKey ? "Exa" : "Brave"})` : " · web_search off (set EXA_API_KEY)"}`,
+    `Web: fetch_url (any URL · GET+POST)${webSearchOn ? ` · web_search (${exaKey ? "Exa" : "Brave"})` : " · web_search off (set EXA_API_KEY)"}`,
   );
   notifyIfUpdate(thinyDir);
 
@@ -835,7 +850,9 @@ export async function runCli(): Promise<void> {
       providersOf(cfg).forEach((pr) => {
         renderInfo(`  • ${pr.label}: ${pr.model}`);
       });
-      modelId = ((await prompt.readLine("New model id for the active provider (blank to cancel): ")) ?? "").trim();
+      modelId = (
+        (await prompt.readLine("New model id for the active provider (blank to cancel): ")) ?? ""
+      ).trim();
       if (!modelId) return;
     }
     prov.model = modelId;
@@ -850,7 +867,12 @@ export async function runCli(): Promise<void> {
     renderInfo(
       "\nCommands: /new · /connect · /models · /tools · /skills · /session · /stats · /verify <blobId> · /clear · /help",
     );
-    renderInfo(`Tools: ${agent.registry.all().map((t) => t.name).join(", ")}`);
+    renderInfo(
+      `Tools: ${agent.registry
+        .all()
+        .map((t) => t.name)
+        .join(", ")}`,
+    );
     const cats = [...defaultRegistry.byCategory()].map(
       ([cat, defs]) => `${cat}(${defs.map((d) => d.id).join(",")})`,
     );
@@ -858,226 +880,233 @@ export async function runCli(): Promise<void> {
   };
 
   try {
-  for (;;) {
-    // Any write that finished in the gap since the last render → show its link before prompting.
-    for (const ref of memoryRefs.splice(0))
-      renderStored("memory saved", explorerLinks(ref, network), memBackend);
-    if (pendingWrites > 0) renderSaving("memory", memBackend); // last turn's write still uploading
-    const input = await prompt.readLine();
-    if (input === null) break; // EOF / Ctrl-D — exit cleanly
-    const trimmed = input.trim();
-    if (!trimmed) continue;
-
-    if (trimmed.startsWith("/")) {
-      const parts = trimmed.slice(1).split(" ");
-      const cmd = parts[0];
-      const arg = parts.slice(1).join(" ").trim() || undefined;
-      // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
-      switch (cmd) {
-        case "": // bare "/" — show everything the CLI can do
-          showSlashMenu();
-          break;
-        case "connect":
-          await handleConnect(arg);
-          break;
-        case "models":
-        case "model":
-          await handleModels(arg);
-          break;
-        case "new": {
-          // Long-term memory (facts on Walrus) persists automatically — just rotate the transcript.
-          currentSessionId = `cli-${new Date().getTime().toString()}`;
-          renderInfo("New session started — long-term memory carries over");
-          break;
-        }
-        case "tools":
-          renderInfo(
-            `\nTools:\n${agent.registry
-              .all()
-              .map((t) => `  • ${t.name}  ${t.description.slice(0, 55)}`)
-              .join("\n")}\n`,
-          );
-          break;
-        case "skills":
-          renderInfo("\nAvailable skills:");
-          for (const [cat, defs] of defaultRegistry.byCategory()) {
-            renderInfo(`  [${cat}]  ${defs.map((d) => d.id).join(", ")}`);
-          }
-          renderInfo("");
-          break;
-        case "session":
-          renderInfo(`Session: ${currentSessionId}`);
-          break;
-        case "stats":
-          renderInfo(
-            `\nSession ${currentSessionId.slice(-8)} · ${String(session.turns)} turn${session.turns === 1 ? "" : "s"}\n` +
-              `  tokens: ↑${formatTokens(session.inputTokens)} ↓${formatTokens(session.outputTokens)}\n` +
-              `  tool calls: ${String(session.toolCalls)}\n`,
-          );
-          break;
-        case "verify": {
-          const blobId = parts[1];
-          if (!blobId) {
-            renderWarning("usage: /verify <blobId>");
-            break;
-          }
-          try {
-            const trail = await verifyAuditTrail(walrus, blobId);
-            renderInfo(
-              `\nAudit trail ${blobId}\n  session: ${trail.sessionId}  ·  ${String(trail.count)} entries  ·  ${trail.createdAt}`,
-            );
-            for (const e of trail.entries) {
-              const what =
-                typeof e.kind === "string" ? e.kind : typeof e.event === "string" ? e.event : "";
-              const tool = typeof e.tool === "string" ? ` (${e.tool})` : "";
-              renderInfo(`  • [${e.level}] ${what}${tool}`);
-            }
-            renderInfo(`\n  source: ${walruscanBlobUrl(blobId, network)}\n`);
-          } catch (err: unknown) {
-            renderError(err instanceof Error ? err.message : String(err));
-          }
-          break;
-        }
-        case "clear":
-          clearScreen();
-          renderHeader({ model: activeModelName, session: currentSessionId, persona: personaName });
-          renderToolsAndSkills(registeredTools, skillsByCategory, {
-            model: activeModelName,
-            session: currentSessionId,
-            persona: personaName,
-          });
-          renderHints(logFile);
-          break;
-        case "help":
-          renderInfo(
-            "\n/new · /connect · /models · /tools · /skills · /stats · /session · /verify <blobId> · /clear · /help\n" +
-              "(type just `/` to see commands + all tools + skills)\n",
-          );
-          break;
-        default:
-          renderWarning(`Unknown command: /${cmd ?? ""}  — try /help`);
-      }
-      continue;
-    }
-
-    renderAgentLabel(personaName);
-    spinner.start("thinking…  (esc to cancel)");
-
-    budget.reset(); // reset per-turn counters before each run
-    resetTurn(turn);
-    const startedAt = Date.now();
-
-    // Esc cancels the in-flight turn (aborts the model request).
-    const ac = new AbortController();
-    const onKey = (_s: string, key: { name?: string } | undefined): void => {
-      if (key?.name === "escape") ac.abort();
-    };
-    stdin.on("keypress", onKey);
-
-    try {
-      let firstToken = true;
-      const stream = createMarkdownWriter((s) => stdout.write(s));
-      const toolHandler = (payload: unknown): void => {
-        const { call } = payload as { call: { name: string } };
-        spinner.stop();
-        stdout.write(`  \x1b[33m⚙\x1b[0m \x1b[2m${call.name}\x1b[0m\n`);
-        spinner.start("running…");
-      };
-      agent.events.on("beforeToolCall", toolHandler);
-
-      let reply: string;
-      try {
-        reply = await agent.run(trimmed, {
-          sessionId: currentSessionId,
-          signal: ac.signal,
-          toolChoice: forcedToolFor(trimmed), // deterministic routing for clear read-only Sui asks
-
-          onToken: (delta) => {
-            // Stop the spinner on every token, not just the first: it gets restarted after each tool
-            // call, so post-tool tokens would otherwise stream over the live "running…" line and
-            // corrupt the output. stop() is a no-op once already stopped.
-            spinner.stop();
-            firstToken = false;
-            stream.push(delta);
-          },
-        });
-      } catch (err: unknown) {
-        if (ac.signal.aborted) {
-          spinner.stop();
-          stream.end();
-          stdout.write("\n  \x1b[2m⊘ cancelled (Esc)\x1b[0m\n");
-          continue; // back to the prompt; nothing persisted for this turn
-        }
-        throw err;
-      } finally {
-        agent.events.off("beforeToolCall", toolHandler);
-      }
-
-      spinner.stop();
-
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      if (firstToken) {
-        // No streaming tokens — render the blocking reply (or an empty-response notice).
-        stream.push(reply.length > 0 ? reply : "\x1b[2m(model returned empty response)\x1b[0m");
-      }
-      stream.end();
-
-      renderAgentDone();
-
-      // Clean status line — replaces the raw session_end JSON.
-      const durMs = Date.now() - startedAt;
-      session.turns += 1;
-      session.inputTokens += turn.inputTokens;
-      session.outputTokens += turn.outputTokens;
-      session.toolCalls += turn.toolCalls;
-      renderStatus([
-        activeModelName,
-        `${(durMs / 1000).toFixed(1)}s`,
-        `↑${formatTokens(turn.inputTokens)} ↓${formatTokens(turn.outputTokens)}`,
-        turn.toolCalls > 0 ? `${String(turn.toolCalls)} tool${turn.toolCalls === 1 ? "" : "s"}` : "",
-      ]);
-
-      // Memory that already finished uploading this turn → show its verifiable blob(s) now.
-      // Writes still in flight surface later (above the prompt) via deliverRef.
+    for (;;) {
+      // Any write that finished in the gap since the last render → show its link before prompting.
       for (const ref of memoryRefs.splice(0))
         renderStored("memory saved", explorerLinks(ref, network), memBackend);
+      if (pendingWrites > 0) renderSaving("memory", memBackend); // last turn's write still uploading
+      const input = await prompt.readLine();
+      if (input === null) break; // EOF / Ctrl-D — exit cleanly
+      const trimmed = input.trim();
+      if (!trimmed) continue;
 
-      // Store this turn's action log on Walrus — backgrounded so the prompt returns immediately and
-      // the user can keep chatting; the link surfaces above the prompt once the upload lands.
-      if (walrusAudit && walrusAudit.entries().length > 0) {
-        pendingWrites += 1;
-        const flushP = walrusAudit.flush(currentSessionId); // serialises the buffer synchronously…
-        walrusAudit.reset(); // …so clearing it now can't drop entries from the in-flight upload
-        void flushP
-          .then((ref) => {
-            if (pendingWrites > 0) pendingWrites -= 1;
-            if (ref) deliverRef(ref);
-          })
-          .catch((err: unknown) => {
-            if (pendingWrites > 0) pendingWrites -= 1;
-            const m = `Walrus audit flush failed: ${err instanceof Error ? err.message : String(err)}`;
-            if (prompt.isReading()) {
-              prompt.printAbove(() => {
-                renderWarning(m);
-              });
-            } else renderWarning(m);
-          });
+      if (trimmed.startsWith("/")) {
+        const parts = trimmed.slice(1).split(" ");
+        const cmd = parts[0];
+        const arg = parts.slice(1).join(" ").trim() || undefined;
+        // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
+        switch (cmd) {
+          case "": // bare "/" — show everything the CLI can do
+            showSlashMenu();
+            break;
+          case "connect":
+            await handleConnect(arg);
+            break;
+          case "models":
+          case "model":
+            await handleModels(arg);
+            break;
+          case "new": {
+            // Long-term memory (facts on Walrus) persists automatically — just rotate the transcript.
+            currentSessionId = `cli-${new Date().getTime().toString()}`;
+            renderInfo("New session started — long-term memory carries over");
+            break;
+          }
+          case "tools":
+            renderInfo(
+              `\nTools:\n${agent.registry
+                .all()
+                .map((t) => `  • ${t.name}  ${t.description.slice(0, 55)}`)
+                .join("\n")}\n`,
+            );
+            break;
+          case "skills":
+            renderInfo("\nAvailable skills:");
+            for (const [cat, defs] of defaultRegistry.byCategory()) {
+              renderInfo(`  [${cat}]  ${defs.map((d) => d.id).join(", ")}`);
+            }
+            renderInfo("");
+            break;
+          case "session":
+            renderInfo(`Session: ${currentSessionId}`);
+            break;
+          case "stats":
+            renderInfo(
+              `\nSession ${currentSessionId.slice(-8)} · ${String(session.turns)} turn${session.turns === 1 ? "" : "s"}\n` +
+                `  tokens: ↑${formatTokens(session.inputTokens)} ↓${formatTokens(session.outputTokens)}\n` +
+                `  tool calls: ${String(session.toolCalls)}\n`,
+            );
+            break;
+          case "verify": {
+            const blobId = parts[1];
+            if (!blobId) {
+              renderWarning("usage: /verify <blobId>");
+              break;
+            }
+            try {
+              const trail = await verifyAuditTrail(walrus, blobId);
+              renderInfo(
+                `\nAudit trail ${blobId}\n  session: ${trail.sessionId}  ·  ${String(trail.count)} entries  ·  ${trail.createdAt}`,
+              );
+              for (const e of trail.entries) {
+                const what =
+                  typeof e.kind === "string" ? e.kind : typeof e.event === "string" ? e.event : "";
+                const tool = typeof e.tool === "string" ? ` (${e.tool})` : "";
+                renderInfo(`  • [${e.level}] ${what}${tool}`);
+              }
+              renderInfo(`\n  source: ${walruscanBlobUrl(blobId, network)}\n`);
+            } catch (err: unknown) {
+              renderError(err instanceof Error ? err.message : String(err));
+            }
+            break;
+          }
+          case "clear":
+            clearScreen();
+            renderHeader({
+              model: activeModelName,
+              session: currentSessionId,
+              persona: personaName,
+            });
+            renderToolsAndSkills(registeredTools, skillsByCategory, {
+              model: activeModelName,
+              session: currentSessionId,
+              persona: personaName,
+            });
+            renderHints(logFile);
+            break;
+          case "help":
+            renderInfo(
+              "\n/new · /connect · /models · /tools · /skills · /stats · /session · /verify <blobId> · /clear · /help\n" +
+                "(type just `/` to see commands + all tools + skills)\n",
+            );
+            break;
+          default:
+            renderWarning(`Unknown command: /${cmd ?? ""}  — try /help`);
+        }
+        continue;
       }
-    } catch (err: unknown) {
-      spinner.stop();
-      const msg = err instanceof Error ? err.message : String(err);
-      // A model/endpoint misconfig (wrong model id, base URL, or key) surfaces as an API error —
-      // point the user at where to fix it instead of leaving them guessing.
-      const looksLikeModelError = /\b(model|api|channel|base ?url|unauthorized|not found|invalid|401|404)\b/i.test(msg);
-      renderError(
-        looksLikeModelError
-          ? `${msg}\n  ↳ Check your model, base URL, and API key (run \`thiny init\`, or edit ~/.thiny/config.json / .env).`
-          : msg,
-      );
-    } finally {
-      stdin.off("keypress", onKey); // detach the per-turn Esc listener
+
+      renderAgentLabel(personaName);
+      spinner.start("thinking…  (esc to cancel)");
+
+      budget.reset(); // reset per-turn counters before each run
+      resetTurn(turn);
+      const startedAt = Date.now();
+
+      // Esc cancels the in-flight turn (aborts the model request).
+      const ac = new AbortController();
+      const onKey = (_s: string, key: { name?: string } | undefined): void => {
+        if (key?.name === "escape") ac.abort();
+      };
+      stdin.on("keypress", onKey);
+
+      try {
+        let firstToken = true;
+        const stream = createMarkdownWriter((s) => stdout.write(s));
+        const toolHandler = (payload: unknown): void => {
+          const { call } = payload as { call: { name: string } };
+          spinner.stop();
+          stdout.write(`  \x1b[33m⚙\x1b[0m \x1b[2m${call.name}\x1b[0m\n`);
+          spinner.start("running…");
+        };
+        agent.events.on("beforeToolCall", toolHandler);
+
+        let reply: string;
+        try {
+          reply = await agent.run(trimmed, {
+            sessionId: currentSessionId,
+            signal: ac.signal,
+            toolChoice: forcedToolFor(trimmed), // deterministic routing for clear read-only Sui asks
+
+            onToken: (delta) => {
+              // Stop the spinner on every token, not just the first: it gets restarted after each tool
+              // call, so post-tool tokens would otherwise stream over the live "running…" line and
+              // corrupt the output. stop() is a no-op once already stopped.
+              spinner.stop();
+              firstToken = false;
+              stream.push(delta);
+            },
+          });
+        } catch (err: unknown) {
+          if (ac.signal.aborted) {
+            spinner.stop();
+            stream.end();
+            stdout.write("\n  \x1b[2m⊘ cancelled (Esc)\x1b[0m\n");
+            continue; // back to the prompt; nothing persisted for this turn
+          }
+          throw err;
+        } finally {
+          agent.events.off("beforeToolCall", toolHandler);
+        }
+
+        spinner.stop();
+
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (firstToken) {
+          // No streaming tokens — render the blocking reply (or an empty-response notice).
+          stream.push(reply.length > 0 ? reply : "\x1b[2m(model returned empty response)\x1b[0m");
+        }
+        stream.end();
+
+        renderAgentDone();
+
+        // Clean status line — replaces the raw session_end JSON.
+        const durMs = Date.now() - startedAt;
+        session.turns += 1;
+        session.inputTokens += turn.inputTokens;
+        session.outputTokens += turn.outputTokens;
+        session.toolCalls += turn.toolCalls;
+        renderStatus([
+          activeModelName,
+          `${(durMs / 1000).toFixed(1)}s`,
+          `↑${formatTokens(turn.inputTokens)} ↓${formatTokens(turn.outputTokens)}`,
+          turn.toolCalls > 0
+            ? `${String(turn.toolCalls)} tool${turn.toolCalls === 1 ? "" : "s"}`
+            : "",
+        ]);
+
+        // Memory that already finished uploading this turn → show its verifiable blob(s) now.
+        // Writes still in flight surface later (above the prompt) via deliverRef.
+        for (const ref of memoryRefs.splice(0))
+          renderStored("memory saved", explorerLinks(ref, network), memBackend);
+
+        // Store this turn's action log on Walrus — backgrounded so the prompt returns immediately and
+        // the user can keep chatting; the link surfaces above the prompt once the upload lands.
+        if (walrusAudit && walrusAudit.entries().length > 0) {
+          pendingWrites += 1;
+          const flushP = walrusAudit.flush(currentSessionId); // serialises the buffer synchronously…
+          walrusAudit.reset(); // …so clearing it now can't drop entries from the in-flight upload
+          void flushP
+            .then((ref) => {
+              if (pendingWrites > 0) pendingWrites -= 1;
+              if (ref) deliverRef(ref);
+            })
+            .catch((err: unknown) => {
+              if (pendingWrites > 0) pendingWrites -= 1;
+              const m = `Walrus audit flush failed: ${err instanceof Error ? err.message : String(err)}`;
+              if (prompt.isReading()) {
+                prompt.printAbove(() => {
+                  renderWarning(m);
+                });
+              } else renderWarning(m);
+            });
+        }
+      } catch (err: unknown) {
+        spinner.stop();
+        const msg = err instanceof Error ? err.message : String(err);
+        // A model/endpoint misconfig (wrong model id, base URL, or key) surfaces as an API error —
+        // point the user at where to fix it instead of leaving them guessing.
+        const looksLikeModelError =
+          /\b(model|api|channel|base ?url|unauthorized|not found|invalid|401|404)\b/i.test(msg);
+        renderError(
+          looksLikeModelError
+            ? `${msg}\n  ↳ Check your model, base URL, and API key (run \`thiny init\`, or edit ~/.thiny/config.json / .env).`
+            : msg,
+        );
+      } finally {
+        stdin.off("keypress", onKey); // detach the per-turn Esc listener
+      }
     }
-  }
   } finally {
     prompt.close(); // restore the terminal (raw mode off)
     if (flushMemory) await flushMemory().catch(() => undefined);
